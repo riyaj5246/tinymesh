@@ -174,28 +174,53 @@ void simplifyQEM(Mesh &mesh, int numTarget, int maxTrials, bool verbose) {
             Qs[vs[2]->index()] += Kp;
         }
 
-        // Push QEMs
-        std::priority_queue<QEMNode, std::vector<QEMNode>, std::greater<QEMNode>> que;
+        // // Push QEMs
+        // std::priority_queue<QEMNode, std::vector<QEMNode>, std::greater<QEMNode>> que;
+        // for (int i = 0; i < numHalfedges; i++) {
+        //     Halfedge *he = mesh.halfedge(i);
+
+        //     Vertex *v1 = he->src();
+        //     Vertex *v2 = he->dst();
+
+        //     int i1 = v1->index();
+        //     int i2 = v2->index();
+        //     Matrix4 &q1 = Qs[i1];
+        //     Matrix4 &q2 = Qs[i2];
+        //     Vec3 v;
+        //     const double qem = computeQEM(q1, q2, *v1, *v2, &v);
+        //     que.push(QEMNode(qem, he, v));
+        // }
+
+        // HEAP OPTIMIZATION 
+
+        std::vector<QEMNode> que;
+        que.reserve(numHalfedges);
+
         for (int i = 0; i < numHalfedges; i++) {
             Halfedge *he = mesh.halfedge(i);
 
             Vertex *v1 = he->src();
             Vertex *v2 = he->dst();
 
-            int i1 = v1->index();
-            int i2 = v2->index();
-            Matrix4 &q1 = Qs[i1];
-            Matrix4 &q2 = Qs[i2];
+            Matrix4 &q1 = Qs[v1->index()];
+            Matrix4 &q2 = Qs[v2->index()];
             Vec3 v;
             const double qem = computeQEM(q1, q2, *v1, *v2, &v);
-            que.push(QEMNode(qem, he, v));
+            que.emplace_back(qem, he, v);
         }
+
+        // Turn vector into a min-heap in O(N)
+        std::make_heap(que.begin(), que.end(), std::greater<QEMNode>());
 
         // Remove halfedges
         std::set<Halfedge *> removedHalfedges;
         while (!que.empty() && numRemoved < numTargetRemove) {
-            QEMNode qn = que.top();
-            que.pop();
+            // QEMNode qn = que.top();
+            // que.pop();
+
+            std::pop_heap(que.begin(), que.end(), std::greater<QEMNode>());
+            QEMNode qn = que.back();
+            que.pop_back();
 
             if (removedHalfedges.find(qn.he) != removedHalfedges.end()) {
                 continue;
