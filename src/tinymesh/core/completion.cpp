@@ -62,8 +62,11 @@ Face *Mesh::addNewTriangle(const std::vector<Vertex *> &boundary, const std::tup
     new_he2->src_ = boundary[i2];
 
     new_he0->next_ = new_he1;
+    new_he1->prev_ = new_he0;
     new_he1->next_ = new_he2;
+    new_he2->prev_ = new_he1;
     new_he2->next_ = new_he0;
+    new_he0->prev_ = new_he2;
 
     new_he0->isBoundary_ = false;
     new_he1->isBoundary_ = false;
@@ -274,6 +277,7 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
                 Assertion(he_prev->next_ == he, "Error!!");
                 Assertion(he->next_ == he_next, "Error!!");
                 he_prev->next_ = he_next;
+                he_next->prev_ = he_prev;
 
                 Halfedge *he0 = he->rev_;
                 Halfedge *he1 = he0->next_;
@@ -364,7 +368,9 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
             new_he->src_ = face_vs[prev];
             new_he->isBoundary_ = true;
             pair2he[E((prev - 1 + N) % N, prev)]->next_ = new_he;
+            new_he->prev_ = pair2he[E((prev - 1 + N) % N, prev)];
             new_he->next_ = pair2he[E(next, (next + 1) % N)];
+            pair2he[E(next, (next + 1) % N)]->prev_ = new_he;
 
             pair2he[E(prev, next)] = new_he;
             he2pair[new_he] = E(prev, next);
@@ -404,8 +410,11 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
             new_he2->isBoundary_ = true;
 
             pair2he[E((prev - 1 + N) % N, prev)]->next_ = new_he1;
+            new_he1->prev_ = pair2he[E((prev - 1 + N) % N, prev)];
             new_he1->next_ = new_he2;
+            new_he2->prev_ = new_he1;
             new_he2->next_ = pair2he[E(next, (next + 1) % N)];
+            pair2he[E(next, (next + 1) % N)]->prev_ = new_he2;
 
             const int newIndex = (int)face_vs.size();
             face_vs.push_back(new_vert);
@@ -465,9 +474,13 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
             new_he3->isBoundary_ = true;
 
             pair2he[E((prev - 1 + N) % N, prev)]->next_ = new_he1;
+            new_he1->prev_ = pair2he[E((prev - 1 + N) % N, prev)];
             new_he1->next_ = new_he2;
+            new_he2->prev_ = new_he1;
             new_he2->next_ = new_he3;
+            new_he3->prev_ = new_he2;
             new_he3->next_ = pair2he[E(next, (next + 1) % N)];
+            pair2he[E(next, (next + 1) % N)]->prev_ = new_he3;
 
             const int newIndex1 = (int)face_vs.size();
             face_vs.push_back(new_vert1);

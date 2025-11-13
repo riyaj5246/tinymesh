@@ -281,6 +281,7 @@ void Mesh::construct() {
         for (int j = 0; j < ngon; j++) {
             const int k = (j + 1) % ngon;
             faceHalfedges[j]->next_ = faceHalfedges[k];
+            faceHalfedges[k]->prev_ = faceHalfedges[j];
         }
     }
 
@@ -336,6 +337,7 @@ void Mesh::construct() {
             for (int j = 0; j < degree; j++) {
                 const int k = (j - 1 + degree) % degree;
                 boundaryHalfedges[j]->next_ = boundaryHalfedges[k];
+                boundaryHalfedges[k]->prev_ = boundaryHalfedges[j];
             }
         }
     }
@@ -604,20 +606,32 @@ bool Mesh::splitHE(Halfedge *he) {
 
     // Update next half-edges
     he->next_ = he0;
+    he0->prev_ = he;
     he0->next_ = he01;
+    he01->prev_ = he0;
     he01->next_ = he;
+    he->prev_ = he01;
 
     he_new->next_ = he02;
+    he02->prev_ = he_new;
     he02->next_ = he1;
+    he1->prev_ = he02;
     he1->next_ = he_new;
+    he_new->prev_ = he1;
 
     rev->next_ = he11;
+    he11->prev_ = rev;
     he11->next_ = he3;
+    he3->prev_ = he11;
     he3->next_ = rev;
+    rev->prev_ = he3;
 
     rev_new->next_ = he2;
+    he2->prev_ = rev_new;
     he2->next_ = he12;
+    he12->prev_ = he2;
     he12->next_ = rev_new;
+    rev_new->prev_ = he12;
 
     // Update rev half-edges
     he->rev_ = rev;
@@ -911,11 +925,17 @@ bool Mesh::flipHE(Halfedge *he) {
 
     // Update face circulation
     he->next_ = he1;
+    he1->prev_ = he;
     he1->next_ = he2;
+    he2->prev_ = he1;
     he2->next_ = he;
+    he->prev_ = he2;
     rev->next_ = he3;
+    he3->prev_ = rev;
     he3->next_ = he0;
+    he0->prev_ = he3;
     he0->next_ = rev;
+    rev->prev_ = he0;
 
     // Update faces
     f0->halfedge_ = he;

@@ -36,11 +36,7 @@ public:
         return next_;
     }
     Halfedge *prev() const {
-        Halfedge *iter = next_;
-        while (iter->next_ != this) {
-            iter = iter->next_;
-        }
-        return iter;
+        return prev_;
     }
 
     Halfedge *rev() const {
@@ -65,6 +61,7 @@ public:
 private:
     Vertex *src_ = nullptr;
     Halfedge *next_ = nullptr;
+    Halfedge *prev_ = nullptr;
     Halfedge *rev_ = nullptr;
     Face *face_ = nullptr;
     int index_ = -1;
