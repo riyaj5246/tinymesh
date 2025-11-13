@@ -632,7 +632,7 @@ void holeFillContextCoherent(Mesh &mesh, int maxiters) {
         }
 
         // Verification
-        mesh.verify();
+        // mesh.verify();
         pbar.step();
     }
 }

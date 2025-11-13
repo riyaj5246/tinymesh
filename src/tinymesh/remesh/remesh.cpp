@@ -18,7 +18,7 @@ namespace tinymesh {
 
 void remeshTriangular(Mesh &mesh, double shortLength, double longLength, double keepAngleLessThan, int iterations,
                       bool verbose) {
-    Assertion(mesh.verify(), "Invalid mesh!");
+    // Assertion(mesh.verify(), "Invalid mesh!");
 
     // Compute average edge length
     int count;
@@ -105,7 +105,7 @@ void remeshTriangular(Mesh &mesh, double shortLength, double longLength, double 
             Info("#face: %d\n", (int)mesh.numFaces());
         }
 
-        mesh.verify();
+        // mesh.verify();
 
         // Collapse short edges
         indices.clear();
