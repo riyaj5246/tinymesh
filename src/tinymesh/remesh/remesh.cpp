@@ -107,7 +107,7 @@ void remeshTriangular(Mesh &mesh, double shortLength, double longLength, double 
             Info("#face: %d\n", (int)mesh.numFaces());
         }
 
-        // mesh.verify();
+        mesh.verify();
 
         // Collapse short edges
         // indices.clear();
