@@ -40,8 +40,13 @@ public:
         std::copy(other.elems.begin(), other.elems.end(), elems.begin());
     }
 
-    Vec &operator=(const Vec other) {
+    Vec &operator=(const Vec &other) {
         std::copy(other.elems.begin(), other.elems.end(), elems.begin());
+        return *this;
+    }
+    
+    Vec &operator=(Vec &&other) noexcept {
+        elems = std::move(other.elems);
         return *this;
     }
 
@@ -67,16 +72,11 @@ public:
     }
 
     bool operator==(const Vec &other) const {
-        if (elems.size() != other.elems.size()) {
-            return false;
-        }
-
         for (int i = 0; i < Dims; i++) {
             if (elems[i] != other.elems[i]) {
                 return false;
             }
         }
-
         return true;
     }
 

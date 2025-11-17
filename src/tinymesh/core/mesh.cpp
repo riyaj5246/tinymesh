@@ -112,6 +112,7 @@ Mesh Mesh::clone() {
 
 std::vector<Vec3> Mesh::getVertices() const {
     std::vector<Vec3> ret;
+    ret.reserve(vertices_.size());
     for (const auto &v : vertices_) {
         ret.push_back(v->pos());
     }
@@ -120,6 +121,7 @@ std::vector<Vec3> Mesh::getVertices() const {
 
 std::vector<uint32_t> Mesh::getVertexIndices() const {
     std::vector<uint32_t> ret;
+    ret.reserve(faces_.size() * 3);
     for (const auto &f : faces_) {
         if (f->isHole()) {
             continue;

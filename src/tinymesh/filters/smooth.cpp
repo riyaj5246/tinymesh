@@ -70,6 +70,7 @@ void smoothTaubin(Mesh &mesh, double shrink, double inflate, int iterations) {
 
             // Collect surrounding vertices
             std::vector<Vec3> pts;
+            pts.reserve(v->degree());
             for (auto vit = v->v_begin(); vit != v->v_end(); ++vit) {
                 pts.push_back(vit->pos());
             }

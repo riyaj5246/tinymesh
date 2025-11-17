@@ -70,6 +70,7 @@ bool Vertex::isBoundary() const {
 
 double Vertex::volonoiArea() const {
     std::vector<const Vertex *> neighbors;
+    neighbors.reserve(degree());
     for (auto it = v_begin(); it != v_end(); ++it) {
         neighbors.push_back(it.ptr());
     }
@@ -148,6 +149,7 @@ double Vertex::volonoiArea(const Face *const f) const {
 double Vertex::K() const {
     // NOTE: VertexIterator traverses neighboring vertices in the clockwise order.
     std::vector<const Vertex *> neighbors;
+    neighbors.reserve(degree());
     for (auto it = v_begin(); it != v_end(); ++it) {
         neighbors.push_back(it.ptr());
     }
@@ -188,6 +190,7 @@ double Vertex::K() const {
 double Vertex::H() const {
     // NOTE: VertexIterator traverses neighboring vertices in the clockwise order.
     std::vector<const Vertex *> neighbors;
+    neighbors.reserve(degree());
     for (auto it = v_begin(); it != v_end(); ++it) {
         neighbors.push_back(it.ptr());
     }

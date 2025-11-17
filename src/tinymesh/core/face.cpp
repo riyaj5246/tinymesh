@@ -22,6 +22,7 @@ bool Face::operator==(const Face &other) const {
 
 Triangle Face::toTriangle() const {
     std::vector<Vec3> vs;
+    vs.reserve(3);
     for (auto it = v_begin(); it != v_end(); ++it) {
         vs.push_back(it->pos());
     }
@@ -33,6 +34,7 @@ Triangle Face::toTriangle() const {
 
 Vec3 Face::normal() const {
     std::vector<Vec3> vs;
+    vs.reserve(numCorners());
     for (auto it = v_begin(); it != v_end(); ++it) {
         vs.push_back(it->pos());
     }
@@ -52,6 +54,7 @@ Vec3 Face::normal() const {
 
 double Face::area() const {
     std::vector<Vec3> vs;
+    vs.reserve(numCorners());
     for (auto it = v_begin(); it != v_end(); ++it) {
         vs.push_back(it->pos());
     }

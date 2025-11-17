@@ -51,6 +51,7 @@ void denoiseNormalGaussian(Mesh &mesh, double sigma, int iterations) {
         omp_parallel_for(int i = 0; i < nf; i++) {
             Face *f = mesh.face(i);
             std::vector<Vec3> vs;
+            vs.reserve(3);
             for (auto vit = f->v_begin(); vit != f->v_end(); ++vit) {
                 vs.push_back(vit->pos());
             }
@@ -117,6 +118,7 @@ void denoiseNormalBilateral(Mesh &mesh, double sigmaCenter, double sigmaNormal, 
         omp_parallel_for(int i = 0; i < nf; i++) {
             Face *f = mesh.face(i);
             std::vector<Vec3> vs;
+            vs.reserve(3);
             for (auto vit = f->v_begin(); vit != f->v_end(); ++vit) {
                 vs.push_back(vit->pos());
             }

@@ -42,6 +42,7 @@ void remeshTriangular(Mesh &mesh, double shortLength, double longLength, double 
     for (int i = 0; i < (int)mesh.numVertices(); i++) {
         Vertex *v = mesh.vertex(i);
         std::vector<Vec3> neighbors;
+        neighbors.reserve(v->degree());
         for (auto vit = v->v_begin(); vit != v->v_end(); ++vit) {
             neighbors.push_back(vit->pos());
         }
