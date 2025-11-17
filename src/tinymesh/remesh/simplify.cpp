@@ -140,6 +140,59 @@ void simplifyQEM(Mesh &mesh, int numTarget, int maxTrials, bool verbose) {
 
         // Compute quadric metric tensor for current vertices.
         std::vector<Matrix4> Qs(numVertices, Matrix4::Zero());
+        
+#ifdef _OPENMP
+        // Use thread-local accumulation to avoid race conditions
+        const int numThreads = omp_get_max_threads();
+        std::vector<std::vector<Matrix4>> threadQs(numThreads, std::vector<Matrix4>(numVertices, Matrix4::Zero()));
+        
+        #pragma omp parallel
+        {
+            const int tid = omp_get_thread_num();
+            #pragma omp for nowait
+            for (int i = 0; i < numFaces; i++) {
+                Face *f = mesh.face(i);
+                if (f->isBoundary()) {
+                    continue;
+                }
+
+                std::vector<Vertex *> vs;
+                for (auto vit = f->v_begin(); vit != f->v_end(); ++vit) {
+                    vs.push_back(vit.ptr());
+                }
+
+                if (vs.size() != 3) {
+                    Warn("Non trianglar mesh is detected: #vertex = %d", (int)vs.size());
+                    continue;
+                }
+
+                Vec3 norm = cross(vs[1]->pos() - vs[0]->pos(), vs[2]->pos() - vs[0]->pos());
+                const double w = length(norm);
+                norm /= (w + Eps);
+
+                const double nx = norm.x();
+                const double ny = norm.y();
+                const double nz = norm.z();
+                const double d = -dot(norm, vs[0]->pos());
+
+                Matrix4 Kp;
+                Kp << nx * nx, nx * ny, nx * nz, nx * d, ny * nx, ny * ny, ny * nz, ny * d, nz * nx, nz * ny, nz * nz,
+                    nz * d, d * nx, d * ny, d * nz, d * d;
+
+                threadQs[tid][vs[0]->index()] += Kp;
+                threadQs[tid][vs[1]->index()] += Kp;
+                threadQs[tid][vs[2]->index()] += Kp;
+            }
+        }
+        
+        // Merge thread-local results
+        #pragma omp parallel for
+        for (int v = 0; v < numVertices; v++) {
+            for (int tid = 0; tid < numThreads; tid++) {
+                Qs[v] += threadQs[tid][v];
+            }
+        }
+#else
         for (int i = 0; i < numFaces; i++) {
             Face *f = mesh.face(i);
             if (f->isBoundary()) {
@@ -173,6 +226,7 @@ void simplifyQEM(Mesh &mesh, int numTarget, int maxTrials, bool verbose) {
             Qs[vs[1]->index()] += Kp;
             Qs[vs[2]->index()] += Kp;
         }
+#endif
 
         // Push QEMs
         std::priority_queue<QEMNode, std::vector<QEMNode>, std::greater<QEMNode>> que;

@@ -11,6 +11,7 @@
 
 #include "utils.h"
 #include "eigen.h"
+#include "openmp.h"
 #include "vertex.h"
 #include "face.h"
 #include "halfedge.h"
@@ -551,8 +552,12 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
         newNormals[v] = v->normal();
     }
 
+    // Convert to vector for indexed access in parallel loop
+    std::vector<Vertex *> insideVertsVec(insideVerts.begin(), insideVerts.end());
+    
     for (int kIter = 0; kIter < 1000; kIter++) {
-        for (Vertex *v : insideVerts) {
+        omp_parallel_for(size_t idx = 0; idx < insideVertsVec.size(); idx++) {
+            Vertex *v = insideVertsVec[idx];
             Vec3 nn = Vec3(0.0);
             double sumWgt = 0.0;
             for (auto it = v->he_begin(); it != v->he_end(); ++it) {
@@ -586,7 +591,15 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
     }
 
     std::unordered_map<Face *, EigenMatrix3> rotations;
-    for (Face *f : insideFaces) {
+    // Convert to vector for indexed access in parallel loop
+    std::vector<Face *> insideFacesVec(insideFaces.begin(), insideFaces.end());
+    // Pre-allocate rotations map entries to avoid race conditions
+    for (Face *f : insideFacesVec) {
+        rotations[f] = EigenMatrix3::Identity();
+    }
+    
+    omp_parallel_for(size_t idx = 0; idx < insideFacesVec.size(); idx++) {
+        Face *f = insideFacesVec[idx];
         const Vec3 n0 = f->normal();
         Vec3 n1(0.0);
         for (auto it = f->v_begin(); it != f->v_end(); ++it) {
@@ -631,8 +644,7 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
     }
 
     // Solve Poisson equation
-    std::vector<EigenTriplet> tripInner;
-    std::vector<EigenTriplet> tripOuter;
+    // First, build uniqueInner and uniqueOuter maps sequentially (required for indexing)
     std::unordered_map<Vertex *, uint32_t> uniqueInner;
     std::unordered_map<Vertex *, uint32_t> uniqueOuter;
     int countInner = 0;
@@ -642,6 +654,65 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
             uniqueInner[v] = countInner;
             countInner++;
         }
+        for (auto it = v->he_begin(); it != v->he_end(); ++it) {
+            Vertex *u = it->dst();
+            if (insideVerts.count(u) != 0) {
+                // inner vertex
+                if (uniqueInner.count(u) == 0) {
+                    uniqueInner[u] = countInner;
+                    countInner++;
+                }
+            } else {
+                // outer vertex
+                if (uniqueOuter.count(u) == 0) {
+                    uniqueOuter[u] = countOuter;
+                    countOuter++;
+                }
+            }
+        }
+    }
+    
+    // Now build triplets in parallel using thread-local storage
+    std::vector<EigenTriplet> tripInner;
+    std::vector<EigenTriplet> tripOuter;
+    
+#ifdef _OPENMP
+    std::vector<std::vector<EigenTriplet>> threadTripInner(omp_get_max_threads());
+    std::vector<std::vector<EigenTriplet>> threadTripOuter(omp_get_max_threads());
+    
+    #pragma omp parallel
+    {
+        const int tid = omp_get_thread_num();
+        #pragma omp for nowait
+        for (size_t idx = 0; idx < insideVertsVec.size(); idx++) {
+            Vertex *v = insideVertsVec[idx];
+            const int i = uniqueInner[v];
+            double sumWgt = 0.0;
+            for (auto it = v->he_begin(); it != v->he_end(); ++it) {
+                Vertex *u = it->dst();
+                const double weight = it->cotWeight();
+                if (insideVerts.count(u) != 0) {
+                    // inner vertex
+                    const int j = uniqueInner[u];
+                    threadTripInner[tid].emplace_back(i, j, -weight);
+                } else {
+                    // outer vertex
+                    const int j = uniqueOuter[u];
+                    threadTripOuter[tid].emplace_back(i, j, -weight);
+                }
+                sumWgt += weight;
+            }
+            threadTripInner[tid].emplace_back(i, i, sumWgt);
+        }
+    }
+    
+    // Merge thread-local vectors
+    for (size_t tid = 0; tid < threadTripInner.size(); tid++) {
+        tripInner.insert(tripInner.end(), threadTripInner[tid].begin(), threadTripInner[tid].end());
+        tripOuter.insert(tripOuter.end(), threadTripOuter[tid].begin(), threadTripOuter[tid].end());
+    }
+#else
+    for (Vertex *v : insideVerts) {
         const int i = uniqueInner[v];
         double sumWgt = 0.0;
         for (auto it = v->he_begin(); it != v->he_end(); ++it) {
@@ -649,18 +720,10 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
             const double weight = it->cotWeight();
             if (insideVerts.count(u) != 0) {
                 // inner vertex
-                if (uniqueInner.count(u) == 0) {
-                    uniqueInner[u] = countInner;
-                    countInner++;
-                }
                 const int j = uniqueInner[u];
                 tripInner.emplace_back(i, j, -weight);
             } else {
                 // outer vertex
-                if (uniqueOuter.count(u) == 0) {
-                    uniqueOuter[u] = countOuter;
-                    countOuter++;
-                }
                 const int j = uniqueOuter[u];
                 tripOuter.emplace_back(i, j, -weight);
             }
@@ -668,6 +731,7 @@ void Mesh::holeFillAdvancingFront_(Face *face) {
         }
         tripInner.emplace_back(i, i, sumWgt);
     }
+#endif
 
     EigenMatrix bbInner(countInner, 3);
     bbInner.setZero();

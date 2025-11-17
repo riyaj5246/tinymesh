@@ -17,6 +17,7 @@
 #include "core/debug.h"
 #include "core/utils.h"
 #include "core/vec.h"
+#include "core/openmp.h"
 #include "core/vertex.h"
 #include "core/face.h"
 #include "core/halfedge.h"
@@ -136,28 +137,32 @@ std::vector<uint32_t> Mesh::getVertexIndices() const {
 }
 
 double Mesh::getMeanEdgeLength() const {
-    std::unordered_set<Halfedge *> visited;
+    // Note: visited set cannot be used in parallel, so we compute mean over all halfedges
+    // and divide by 2 (each edge has two halfedges)
     double mean = 0.0;
-    for (int i = 0; i < halfedges_.size(); i++) {
-        Halfedge *he = halfedges_[i].get();
-        if (visited.count(he) != 0) continue;
-        if (visited.count(he->rev_) != 0) continue;
-        visited.insert(he);
-
+    int count = 0;
+#ifdef _OPENMP
+    #pragma omp parallel for reduction(+:mean, count)
+#endif
+    for (int i = 0; i < (int)halfedges_.size(); i++) {
         mean += halfedges_[i]->length();
+        count++;
     }
-    return mean / (double)visited.size();
+    return mean / (double)count;
 }
 
 double Mesh::getMeanDihedralAngle() const {
-    std::unordered_set<Halfedge *> visited;
+    // Note: visited set cannot be used in parallel, so we compute mean over all halfedges
+    // and divide by 2 (each edge has two halfedges)
     double mean = 0.0;
-    for (int i = 0; i < halfedges_.size(); i++) {
+    int count = 0;
+#ifdef _OPENMP
+    #pragma omp parallel for reduction(+:mean, count)
+#endif
+    for (int i = 0; i < (int)halfedges_.size(); i++) {
         Halfedge *he = halfedges_[i].get();
-        if (visited.count(he) != 0) continue;
-        if (visited.count(he->rev_) != 0) continue;
-        visited.insert(he);
-
+        if (he->rev_ == nullptr) continue;  // Skip boundary halfedges
+        
         Halfedge *rev = he->rev_;
         Vertex *vh1 = he->src();
         Vertex *vh2 = he->next()->dst();
@@ -169,12 +174,16 @@ double Mesh::getMeanDihedralAngle() const {
         const Vec3 p3 = vh3->pos();
         const Vec3 p4 = vh4->pos();
         mean += dihedral(p2, p1, p3, p4);
+        count++;
     }
-    return mean / (double)visited.size();
+    return mean / (double)count;
 }
 
 double Mesh::getMeanFaceArea() const {
     double mean = 0.0;
+#ifdef _OPENMP
+    #pragma omp parallel for reduction(+:mean)
+#endif
     for (size_t i = 0; i < faces_.size(); i++) {
         mean += faces_[i]->area();
     }
@@ -518,7 +527,7 @@ void Mesh::savePLY(const std::string &filename) const {
     }
 
     std::vector<float> vertexData(vertices_.size() * 3);
-    for (size_t i = 0; i < vertices_.size(); i++) {
+    omp_parallel_for(size_t i = 0; i < vertices_.size(); i++) {
         const Vec3 v = vertices_[i]->pos();
         vertexData[i * 3 + 0] = (float)v.x();
         vertexData[i * 3 + 1] = (float)v.y();

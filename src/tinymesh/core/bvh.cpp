@@ -4,6 +4,7 @@
 #include <stack>
 
 #include "mesh.h"
+#include "core/openmp.h"
 
 namespace tinymesh {
 
@@ -143,6 +144,36 @@ BVHNode *BVH::constructRec(std::vector<BVHPrimitiveInfo> &buildData, int start, 
             const double cmin = centroidBounds.posMin()[splitAxis];
             const double cmax = centroidBounds.posMax()[splitAxis];
             const double idenom = 1.0 / (std::abs(cmax - cmin) + 1.0e-12);
+            
+#ifdef _OPENMP
+            // Use thread-local buckets to avoid race conditions
+            const int numThreads = omp_get_max_threads();
+            std::vector<std::vector<BucketInfo>> threadBuckets(numThreads, std::vector<BucketInfo>(nBuckets));
+            
+            #pragma omp parallel
+            {
+                const int tid = omp_get_thread_num();
+                #pragma omp for nowait
+                for (int i = start; i < end; i++) {
+                    const double numer = buildData[i].centroid[splitAxis] - centroidBounds.posMin()[splitAxis];
+                    int b = static_cast<int>(nBuckets * std::abs(numer) * idenom);
+                    if (b == nBuckets) {
+                        b = nBuckets - 1;
+                    }
+
+                    threadBuckets[tid][b].count++;
+                    threadBuckets[tid][b].bounds = Bounds3::merge(threadBuckets[tid][b].bounds, buildData[i].bounds);
+                }
+            }
+            
+            // Merge thread-local buckets
+            for (int b = 0; b < nBuckets; b++) {
+                for (int tid = 0; tid < numThreads; tid++) {
+                    buckets[b].count += threadBuckets[tid][b].count;
+                    buckets[b].bounds = Bounds3::merge(buckets[b].bounds, threadBuckets[tid][b].bounds);
+                }
+            }
+#else
             for (int i = start; i < end; i++) {
                 const double numer = buildData[i].centroid[splitAxis] - centroidBounds.posMin()[splitAxis];
                 int b = static_cast<int>(nBuckets * std::abs(numer) * idenom);
@@ -153,6 +184,7 @@ BVHNode *BVH::constructRec(std::vector<BVHPrimitiveInfo> &buildData, int start, 
                 buckets[b].count++;
                 buckets[b].bounds = Bounds3::merge(buckets[b].bounds, buildData[i].bounds);
             }
+#endif
 
             double bucketCost[nBuckets - 1] = { 0 };
             for (int i = 0; i < nBuckets - 1; i++) {

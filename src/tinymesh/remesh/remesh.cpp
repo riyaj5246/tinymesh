@@ -21,12 +21,13 @@ void remeshTriangular(Mesh &mesh, double shortLength, double longLength, double 
     Assertion(mesh.verify(), "Invalid mesh!");
 
     // Compute average edge length
-    int count;
-    double Lavg, Lvar;
-    Lavg = 0.0;
-    Lvar = 0.0;
+    int count = 0;
+    double Lavg = 0.0;
+    double Lvar = 0.0;
 
-    count = 0;
+#ifdef _OPENMP
+    #pragma omp parallel for reduction(+:Lavg, Lvar, count)
+#endif
     for (int i = 0; i < (int)mesh.numHalfedges(); i++) {
         Halfedge *he = mesh.halfedge(i);
         const double l = he->length();
@@ -39,7 +40,7 @@ void remeshTriangular(Mesh &mesh, double shortLength, double longLength, double 
     Lvar = Lvar / count - Lavg * Lavg;
 
     // Check whether each vertex is on feature line
-    for (int i = 0; i < (int)mesh.numVertices(); i++) {
+    omp_parallel_for(int i = 0; i < (int)mesh.numVertices(); i++) {
         Vertex *v = mesh.vertex(i);
         std::vector<Vec3> neighbors;
         for (auto vit = v->v_begin(); vit != v->v_end(); ++vit) {
