@@ -79,11 +79,13 @@ void remeshTriangular(Mesh &mesh, double shortLength, double longLength, double 
         }
 
         // Split long edges
-        indices.clear();
-        for (int i = 0; i < (int)mesh.numHalfedges(); i++) {
-            indices.push_back(i);
-        }
+        // indices.clear();
+        // for (int i = 0; i < (int)mesh.numHalfedges(); i++) {
+        //     indices.push_back(i);
+        // }
 
+        indices.resize((size_t)mesh.numHalfedges());
+        std::iota(indices.begin(), indices.end(), 0);
         std::shuffle(indices.begin(), indices.end(), rnd);
 
         for (int i : indices) {
@@ -105,15 +107,19 @@ void remeshTriangular(Mesh &mesh, double shortLength, double longLength, double 
             Info("#face: %d\n", (int)mesh.numFaces());
         }
 
-        mesh.verify();
+        // mesh.verify();
 
         // Collapse short edges
-        indices.clear();
-        for (int i = 0; i < (int)mesh.numHalfedges(); i++) {
-            indices.push_back(i);
-        }
-
+        // indices.clear();
+        // for (int i = 0; i < (int)mesh.numHalfedges(); i++) {
+        //     indices.push_back(i);
+        // }
+        
+        indices.resize((size_t)mesh.numHalfedges());
+        std::iota(indices.begin(), indices.end(), 0);
         std::shuffle(indices.begin(), indices.end(), rnd);
+
+        // std::shuffle(indices.begin(), indices.end(), rnd);
 
         for (int i : indices) {
             if (i >= 0 && i < (int)mesh.numHalfedges()) {
