@@ -34,7 +34,6 @@ __pycache__/
 .ipynb_checkpoints/
 
 # Mesh file format
-*.ply
 *.obj
 *.off
 *.stl
