@@ -1,0 +1,1606 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="726" onload="init(evt)" viewBox="0 0 1200 726" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="726.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Flame Graph</text>
+<text id="details" x="10.00" y="709" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="709" > </text>
+<g id="frames">
+<g >
+<title>__usecs_to_jiffies (10,101,010 samples, 0.38%)</title><rect x="208.2" y="469" width="4.5" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="211.17" y="479.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::he_end (10,101,010 samples, 0.38%)</title><rect x="244.2" y="597" width="4.5" height="15.0" fill="rgb(205,4,1)" rx="2" ry="2" />
+<text  x="247.20" y="607.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree&lt;tinymesh::Halfedge*, tinymesh::Halfedge*, std::_Identity&lt;tinymesh::Halfedge*&gt;, std::less&lt;tinymesh::Halfedge*&gt;, std::allocator&lt;tinymesh::Halfedge*&gt; &gt;::_M_erase (20,202,020 samples, 0.76%)</title><rect x="176.6" y="629" width="9.0" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="179.64" y="639.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree&lt;std::pair&lt;unsigned int, unsigned int&gt;, std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt;, std::_Select1st&lt;std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt; &gt;, std::less&lt;std::pair&lt;unsigned int, unsigned int&gt; &gt;, std::allocator&lt;std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt; &gt; &gt;::find (111,111,110 samples, 4.20%)</title><rect x="127.1" y="629" width="49.5" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="130.10" y="639.5" >std:..</text>
+</g>
+<g >
+<title>malloc (20,202,020 samples, 0.76%)</title><rect x="212.7" y="597" width="9.0" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="215.67" y="607.5" ></text>
+</g>
+<g >
+<title>_int_malloc (10,101,010 samples, 0.38%)</title><rect x="744.1" y="581" width="4.5" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="747.12" y="591.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::HalfedgeIterator::operator++ (10,101,010 samples, 0.38%)</title><rect x="383.8" y="581" width="4.5" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="386.82" y="591.5" ></text>
+</g>
+<g >
+<title>do_syscall_64 (10,101,010 samples, 0.38%)</title><rect x="46.0" y="501" width="4.5" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="49.03" y="511.5" ></text>
+</g>
+<g >
+<title>void std::__push_heap&lt;__gnu_cxx::__normal_iterator&lt;tinymesh::QEMNode*, std::vector&lt;tinymesh::QEMNode, std::allocator&lt;tinymesh::QEMNode&gt; &gt; &gt;, long, tinymesh::QEMNode, __gnu_cxx::__ops::_Iter_comp_val&lt;std::greater&lt;tinymesh::QEMNode&gt; &gt; &gt; (10,101,010 samples, 0.38%)</title><rect x="1185.5" y="645" width="4.5" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="1188.50" y="655.5" ></text>
+</g>
+<g >
+<title>mem_cgroup_commit_charge (10,101,010 samples, 0.38%)</title><rect x="744.1" y="437" width="4.5" height="15.0" fill="rgb(239,158,37)" rx="2" ry="2" />
+<text  x="747.12" y="447.5" ></text>
+</g>
+<g >
+<title>common_interrupt (10,101,010 samples, 0.38%)</title><rect x="109.1" y="517" width="4.5" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="112.08" y="527.5" ></text>
+</g>
+<g >
+<title>irq_exit_rcu (10,101,010 samples, 0.38%)</title><rect x="109.1" y="501" width="4.5" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="112.08" y="511.5" ></text>
+</g>
+<g >
+<title>__napi_poll (10,101,010 samples, 0.38%)</title><rect x="838.7" y="373" width="4.5" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="841.70" y="383.5" ></text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="847.7" y="565" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="850.71" y="575.5" ></text>
+</g>
+<g >
+<title>destroy_large_folio (10,101,010 samples, 0.38%)</title><rect x="838.7" y="69" width="4.5" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="841.70" y="79.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::construct (10,101,010 samples, 0.38%)</title><rect x="843.2" y="581" width="4.5" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="846.21" y="591.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::construct (30,303,030 samples, 1.15%)</title><rect x="564.0" y="597" width="13.5" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="566.97" y="607.5" ></text>
+</g>
+<g >
+<title>exc_page_fault (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="613" width="4.5" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="1048.88" y="623.5" ></text>
+</g>
+<g >
+<title>exc_page_fault (20,202,020 samples, 0.76%)</title><rect x="199.2" y="549" width="9.0" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="202.16" y="559.5" ></text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="266.7" y="533" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="269.72" y="543.5" ></text>
+</g>
+<g >
+<title>malloc (20,202,020 samples, 0.76%)</title><rect x="1131.5" y="629" width="9.0" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="1134.45" y="639.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree_insert_and_rebalance (10,101,010 samples, 0.38%)</title><rect x="185.6" y="629" width="4.6" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="188.65" y="639.5" ></text>
+</g>
+<g >
+<title>_int_malloc (10,101,010 samples, 0.38%)</title><rect x="1032.4" y="581" width="4.5" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="1035.37" y="591.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (10,101,010 samples, 0.38%)</title><rect x="1117.9" y="629" width="4.5" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="1120.94" y="639.5" ></text>
+</g>
+<g >
+<title>__kfree_skb (10,101,010 samples, 0.38%)</title><rect x="838.7" y="117" width="4.5" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="841.70" y="127.5" ></text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="275.7" y="565" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="278.73" y="575.5" ></text>
+</g>
+<g >
+<title>__memmove_evex_unaligned_erms (30,303,030 samples, 1.15%)</title><rect x="1036.9" y="645" width="13.5" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="1039.87" y="655.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::~Mesh (10,101,010 samples, 0.38%)</title><rect x="775.6" y="565" width="4.6" height="15.0" fill="rgb(230,117,28)" rx="2" ry="2" />
+<text  x="778.65" y="575.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::holeFillMinDihedral_ (40,404,040 samples, 1.53%)</title><rect x="1122.4" y="645" width="18.1" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="1125.44" y="655.5" ></text>
+</g>
+<g >
+<title>_raw_spin_unlock_irqrestore (10,101,010 samples, 0.38%)</title><rect x="203.7" y="325" width="4.5" height="15.0" fill="rgb(228,106,25)" rx="2" ry="2" />
+<text  x="206.66" y="335.5" ></text>
+</g>
+<g >
+<title>[libgomp.so.1.0.0] (141,414,140 samples, 5.34%)</title><rect x="1054.9" y="613" width="63.0" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="1057.89" y="623.5" >[libgo..</text>
+</g>
+<g >
+<title>tty_insert_flip_string_and_push_buffer (10,101,010 samples, 0.38%)</title><rect x="46.0" y="309" width="4.5" height="15.0" fill="rgb(217,55,13)" rx="2" ry="2" />
+<text  x="49.03" y="319.5" ></text>
+</g>
+<g >
+<title>std::_Sp_counted_ptr_inplace&lt;tinymesh::Vertex, std::allocator&lt;void&gt;,  (10,101,010 samples, 0.38%)</title><rect x="190.2" y="629" width="4.5" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="193.15" y="639.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::degree (20,202,020 samples, 0.76%)</title><rect x="1140.5" y="645" width="9.0" height="15.0" fill="rgb(247,193,46)" rx="2" ry="2" />
+<text  x="1143.46" y="655.5" ></text>
+</g>
+<g >
+<title>[unknown] (20,202,020 samples, 0.76%)</title><rect x="266.7" y="581" width="9.0" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="269.72" y="591.5" ></text>
+</g>
+<g >
+<title>common_interrupt (10,101,010 samples, 0.38%)</title><rect x="208.2" y="533" width="4.5" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="211.17" y="543.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::collapseHE (10,101,010 samples, 0.38%)</title><rect x="559.5" y="597" width="4.5" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="562.47" y="607.5" ></text>
+</g>
+<g >
+<title>irq_exit_rcu (10,101,010 samples, 0.38%)</title><rect x="64.0" y="565" width="4.5" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="67.05" y="575.5" ></text>
+</g>
+<g >
+<title>process_output_block (10,101,010 samples, 0.38%)</title><rect x="46.0" y="341" width="4.5" height="15.0" fill="rgb(252,216,51)" rx="2" ry="2" />
+<text  x="49.03" y="351.5" ></text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="1027.9" y="597" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="1030.86" y="607.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::he_begin (30,303,030 samples, 1.15%)</title><rect x="230.7" y="597" width="13.5" height="15.0" fill="rgb(225,92,22)" rx="2" ry="2" />
+<text  x="233.69" y="607.5" ></text>
+</g>
+<g >
+<title>all (2,646,464,620 samples, 100%)</title><rect x="10.0" y="677" width="1180.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="13.00" y="687.5" ></text>
+</g>
+<g >
+<title>do_user_addr_fault (10,101,010 samples, 0.38%)</title><rect x="744.1" y="533" width="4.5" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="747.12" y="543.5" ></text>
+</g>
+<g >
+<title>[unknown] (444,444,440 samples, 16.79%)</title><rect x="757.6" y="613" width="198.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="760.63" y="623.5" >[unknown]</text>
+</g>
+<g >
+<title>tinymesh::Mesh::construct (10,101,010 samples, 0.38%)</title><rect x="190.2" y="597" width="4.5" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="193.15" y="607.5" ></text>
+</g>
+<g >
+<title>tinymesh::simplifyQEM (60,606,060 samples, 2.29%)</title><rect x="1149.5" y="645" width="27.0" height="15.0" fill="rgb(241,167,39)" rx="2" ry="2" />
+<text  x="1152.47" y="655.5" >t..</text>
+</g>
+<g >
+<title>do_anonymous_page (10,101,010 samples, 0.38%)</title><rect x="744.1" y="469" width="4.5" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="747.12" y="479.5" ></text>
+</g>
+<g >
+<title>net_rx_action (10,101,010 samples, 0.38%)</title><rect x="838.7" y="389" width="4.5" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="841.70" y="399.5" ></text>
+</g>
+<g >
+<title>file_tty_write.isra.0 (10,101,010 samples, 0.38%)</title><rect x="46.0" y="389" width="4.5" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="49.03" y="399.5" ></text>
+</g>
+<g >
+<title>_int_malloc (10,101,010 samples, 0.38%)</title><rect x="208.2" y="581" width="4.5" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="211.17" y="591.5" ></text>
+</g>
+<g >
+<title>tinymesh::simplifyQEM (20,202,020 samples, 0.76%)</title><rect x="491.9" y="581" width="9.0" height="15.0" fill="rgb(241,167,39)" rx="2" ry="2" />
+<text  x="494.91" y="591.5" ></text>
+</g>
+<g >
+<title>malloc_consolidate (20,202,020 samples, 0.76%)</title><rect x="1167.5" y="581" width="9.0" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="1170.48" y="591.5" ></text>
+</g>
+<g >
+<title>__GI___libc_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="533" width="4.5" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="49.03" y="543.5" ></text>
+</g>
+<g >
+<title>alloc_anon_folio (10,101,010 samples, 0.38%)</title><rect x="203.7" y="453" width="4.5" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="206.66" y="463.5" ></text>
+</g>
+<g >
+<title>unlink_chunk.isra.0 (10,101,010 samples, 0.38%)</title><rect x="208.2" y="565" width="4.5" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="211.17" y="575.5" ></text>
+</g>
+<g >
+<title>Eigen::internal::copy_using_evaluator_innervec_CompleteUnrolling&lt;Eigen::internal::generic_dense_assignment_kernel&lt;Eigen::internal::evaluator&lt;Eigen::Matrix&lt;double, 4, 1, 0, 4, 1&gt; &gt;, Eigen::internal::evaluator&lt;Eigen::Product&lt;Eigen::CwiseBinaryOp&lt;Eigen::internal::scalar_sum_op&lt;double, double&gt;, Eigen::Matrix&lt;double, 4, 4, 0, 4, 4&gt; const, Eigen::Matrix&lt;double, 4, 4, 0, 4, 4&gt; const&gt;, Eigen::Matrix&lt;double, 4, 1, 0, 4, 1&gt;, 1&gt; &gt;, Eigen::internal::assign_op&lt;double, double&gt;, 0&gt;, 0, 4&gt;::run (10,101,010 samples, 0.38%)</title><rect x="28.0" y="629" width="4.5" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="31.02" y="639.5" ></text>
+</g>
+<g >
+<title>unlink_chunk.isra.0 (50,505,050 samples, 1.91%)</title><rect x="820.7" y="485" width="22.5" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="823.69" y="495.5" >u..</text>
+</g>
+<g >
+<title>malloc_consolidate (10,101,010 samples, 0.38%)</title><rect x="775.6" y="501" width="4.6" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="778.65" y="511.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree&lt;tinymesh::Halfedge*, tinymesh::Halfedge*, std::_Identity&lt;tinymesh::Halfedge*&gt;, std::less&lt;tinymesh::Halfedge*&gt;, std::allocator&lt;tinymesh::Halfedge*&gt; &gt;::_M_erase (10,101,010 samples, 0.38%)</title><rect x="1117.9" y="645" width="4.5" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="1120.94" y="655.5" ></text>
+</g>
+<g >
+<title>ip_list_rcv (10,101,010 samples, 0.38%)</title><rect x="64.0" y="421" width="4.5" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="67.05" y="431.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::isLocked (10,101,010 samples, 0.38%)</title><rect x="253.2" y="597" width="4.5" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="256.21" y="607.5" ></text>
+</g>
+<g >
+<title>malloc_consolidate (10,101,010 samples, 0.38%)</title><rect x="266.7" y="501" width="4.5" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="269.72" y="511.5" ></text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="208.2" y="597" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="211.17" y="607.5" ></text>
+</g>
+<g >
+<title>tinymesh::smoothLaplacian (10,101,010 samples, 0.38%)</title><rect x="1176.5" y="645" width="4.5" height="15.0" fill="rgb(250,208,49)" rx="2" ry="2" />
+<text  x="1179.49" y="655.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::v_begin (20,202,020 samples, 0.76%)</title><rect x="482.9" y="581" width="9.0" height="15.0" fill="rgb(236,145,34)" rx="2" ry="2" />
+<text  x="485.90" y="591.5" ></text>
+</g>
+<g >
+<title>ProgressBar::step (10,101,010 samples, 0.38%)</title><rect x="946.8" y="581" width="4.5" height="15.0" fill="rgb(246,190,45)" rx="2" ry="2" />
+<text  x="949.79" y="591.5" ></text>
+</g>
+<g >
+<title>std::set&lt;tinymesh::Halfedge*, std::less&lt;tinymesh::Halfedge*&gt;, std::allocator&lt;tinymesh::Halfedge*&gt; &gt;::insert (10,101,010 samples, 0.38%)</title><rect x="208.2" y="629" width="4.5" height="15.0" fill="rgb(210,27,6)" rx="2" ry="2" />
+<text  x="211.17" y="639.5" ></text>
+</g>
+<g >
+<title>_int_malloc (20,202,020 samples, 0.76%)</title><rect x="199.2" y="581" width="9.0" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="202.16" y="591.5" ></text>
+</g>
+<g >
+<title>folio_add_lru_vma (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="517" width="4.5" height="15.0" fill="rgb(252,216,51)" rx="2" ry="2" />
+<text  x="1048.88" y="527.5" ></text>
+</g>
+<g >
+<title> (10,101,010 samples, 0.38%)</title><rect x="226.2" y="581" width="4.5" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="229.18" y="591.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (20,202,020 samples, 0.76%)</title><rect x="757.6" y="549" width="9.0" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="760.63" y="559.5" ></text>
+</g>
+<g >
+<title>handle_pte_fault (10,101,010 samples, 0.38%)</title><rect x="203.7" y="485" width="4.5" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="206.66" y="495.5" ></text>
+</g>
+<g >
+<title>_int_malloc (121,212,120 samples, 4.58%)</title><rect x="789.2" y="517" width="54.0" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="792.16" y="527.5" >_int_..</text>
+</g>
+<g >
+<title>__handle_mm_fault (10,101,010 samples, 0.38%)</title><rect x="744.1" y="501" width="4.5" height="15.0" fill="rgb(207,9,2)" rx="2" ry="2" />
+<text  x="747.12" y="511.5" ></text>
+</g>
+<g >
+<title>handle_softirqs (10,101,010 samples, 0.38%)</title><rect x="838.7" y="405" width="4.5" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="841.70" y="415.5" ></text>
+</g>
+<g >
+<title>ip_local_deliver (10,101,010 samples, 0.38%)</title><rect x="838.7" y="245" width="4.5" height="15.0" fill="rgb(230,116,27)" rx="2" ry="2" />
+<text  x="841.70" y="255.5" ></text>
+</g>
+<g >
+<title>__handle_mm_fault (10,101,010 samples, 0.38%)</title><rect x="203.7" y="501" width="4.5" height="15.0" fill="rgb(207,9,2)" rx="2" ry="2" />
+<text  x="206.66" y="511.5" ></text>
+</g>
+<g >
+<title>tinymesh::simplifyQEM (333,333,330 samples, 12.60%)</title><rect x="582.0" y="597" width="148.6" height="15.0" fill="rgb(241,167,39)" rx="2" ry="2" />
+<text  x="584.98" y="607.5" >tinymesh::simplify..</text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="847.7" y="549" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="850.71" y="559.5" ></text>
+</g>
+<g >
+<title>Eigen::PartialPivLU&lt;Eigen::Matrix&lt;double, 4, 4, 0, 4, 4&gt; &gt;::compute (10,101,010 samples, 0.38%)</title><rect x="23.5" y="629" width="4.5" height="15.0" fill="rgb(233,128,30)" rx="2" ry="2" />
+<text  x="26.51" y="639.5" ></text>
+</g>
+<g >
+<title>irq_exit_rcu (10,101,010 samples, 0.38%)</title><rect x="208.2" y="517" width="4.5" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="211.17" y="527.5" ></text>
+</g>
+<g >
+<title>asm_exc_page_fault (20,202,020 samples, 0.76%)</title><rect x="199.2" y="565" width="9.0" height="15.0" fill="rgb(225,93,22)" rx="2" ry="2" />
+<text  x="202.16" y="575.5" ></text>
+</g>
+<g >
+<title>[libgomp.so.1.0.0] (10,101,010 samples, 0.38%)</title><rect x="1176.5" y="613" width="4.5" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="1179.49" y="623.5" ></text>
+</g>
+<g >
+<title>do_user_addr_fault (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="597" width="4.5" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="1048.88" y="607.5" ></text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="1027.9" y="613" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="1030.86" y="623.5" ></text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="1032.4" y="597" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="1035.37" y="607.5" ></text>
+</g>
+<g >
+<title>malloc (20,202,020 samples, 0.76%)</title><rect x="199.2" y="597" width="9.0" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="202.16" y="607.5" ></text>
+</g>
+<g >
+<title>_IO_file_write@@GLIBC_2.2.5 (10,101,010 samples, 0.38%)</title><rect x="46.0" y="549" width="4.5" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="49.03" y="559.5" ></text>
+</g>
+<g >
+<title>[unknown] (191,919,190 samples, 7.25%)</title><rect x="757.6" y="581" width="85.6" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="760.63" y="591.5" >[unknown]</text>
+</g>
+<g >
+<title>vfs_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="421" width="4.5" height="15.0" fill="rgb(250,209,50)" rx="2" ry="2" />
+<text  x="49.03" y="431.5" ></text>
+</g>
+<g >
+<title>start_thread (141,414,140 samples, 5.34%)</title><rect x="1054.9" y="629" width="63.0" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="1057.89" y="639.5" >start_..</text>
+</g>
+<g >
+<title>std::basic_streambuf&lt;char, std::char_traits&lt;char&gt; &gt;::xsgetn (10,101,010 samples, 0.38%)</title><rect x="113.6" y="597" width="4.5" height="15.0" fill="rgb(205,4,0)" rx="2" ry="2" />
+<text  x="116.59" y="607.5" ></text>
+</g>
+<g >
+<title>_IO_do_write@@GLIBC_2.2.5 (10,101,010 samples, 0.38%)</title><rect x="46.0" y="565" width="4.5" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="49.03" y="575.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (20,202,020 samples, 0.76%)</title><rect x="852.2" y="581" width="9.0" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="855.21" y="591.5" ></text>
+</g>
+<g >
+<title>std::ios_base::_M_init (10,101,010 samples, 0.38%)</title><rect x="946.8" y="549" width="4.5" height="15.0" fill="rgb(228,107,25)" rx="2" ry="2" />
+<text  x="949.79" y="559.5" ></text>
+</g>
+<g >
+<title>tinymesh::simplifyQEM (90,909,090 samples, 3.44%)</title><rect x="68.5" y="613" width="40.6" height="15.0" fill="rgb(241,167,39)" rx="2" ry="2" />
+<text  x="71.55" y="623.5" >tin..</text>
+</g>
+<g >
+<title>tinymesh::Vertex::v_end (10,101,010 samples, 0.38%)</title><rect x="577.5" y="597" width="4.5" height="15.0" fill="rgb(217,56,13)" rx="2" ry="2" />
+<text  x="580.48" y="607.5" ></text>
+</g>
+<g >
+<title>rmqueue_bulk (10,101,010 samples, 0.38%)</title><rect x="203.7" y="341" width="4.5" height="15.0" fill="rgb(235,138,33)" rx="2" ry="2" />
+<text  x="206.66" y="351.5" ></text>
+</g>
+<g >
+<title>tinymesh::smoothTaubin (10,101,010 samples, 0.38%)</title><rect x="1181.0" y="645" width="4.5" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="1183.99" y="655.5" ></text>
+</g>
+<g >
+<title>common_interrupt (10,101,010 samples, 0.38%)</title><rect x="64.0" y="581" width="4.5" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="67.05" y="591.5" ></text>
+</g>
+<g >
+<title>nf_hook_slow (10,101,010 samples, 0.38%)</title><rect x="64.0" y="373" width="4.5" height="15.0" fill="rgb(243,175,42)" rx="2" ry="2" />
+<text  x="67.05" y="383.5" ></text>
+</g>
+<g >
+<title>handle_pte_fault (10,101,010 samples, 0.38%)</title><rect x="744.1" y="485" width="4.5" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="747.12" y="495.5" ></text>
+</g>
+<g >
+<title>netif_receive_skb_list_internal (10,101,010 samples, 0.38%)</title><rect x="838.7" y="325" width="4.5" height="15.0" fill="rgb(238,151,36)" rx="2" ry="2" />
+<text  x="841.70" y="335.5" ></text>
+</g>
+<g >
+<title>handle_mm_fault (10,101,010 samples, 0.38%)</title><rect x="109.1" y="565" width="4.5" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="112.08" y="575.5" ></text>
+</g>
+<g >
+<title>ip_local_deliver_finish (10,101,010 samples, 0.38%)</title><rect x="838.7" y="229" width="4.5" height="15.0" fill="rgb(225,95,22)" rx="2" ry="2" />
+<text  x="841.70" y="239.5" ></text>
+</g>
+<g >
+<title>__alloc_pages (10,101,010 samples, 0.38%)</title><rect x="203.7" y="405" width="4.5" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="206.66" y="415.5" ></text>
+</g>
+<g >
+<title>__irq_exit_rcu (10,101,010 samples, 0.38%)</title><rect x="109.1" y="485" width="4.5" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="112.08" y="495.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::verifyVertex (10,101,010 samples, 0.38%)</title><rect x="280.2" y="581" width="4.5" height="15.0" fill="rgb(217,58,13)" rx="2" ry="2" />
+<text  x="283.23" y="591.5" ></text>
+</g>
+<g >
+<title>tinymesh::computeQEM (20,202,020 samples, 0.76%)</title><rect x="955.8" y="629" width="9.0" height="15.0" fill="rgb(214,45,10)" rx="2" ry="2" />
+<text  x="958.80" y="639.5" ></text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="208.2" y="613" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="211.17" y="623.5" ></text>
+</g>
+<g >
+<title>_IO_fflush (10,101,010 samples, 0.38%)</title><rect x="46.0" y="597" width="4.5" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="49.03" y="607.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::VertexIterator::ptr (30,303,030 samples, 1.15%)</title><rect x="55.0" y="613" width="13.5" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="58.04" y="623.5" ></text>
+</g>
+<g >
+<title>[unknown] (2,272,727,250 samples, 85.88%)</title><rect x="23.5" y="645" width="1013.4" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="26.51" y="655.5" >[unknown]</text>
+</g>
+<g >
+<title>tinymesh::smoothTaubin (60,606,060 samples, 2.29%)</title><rect x="500.9" y="581" width="27.0" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="503.92" y="591.5" >t..</text>
+</g>
+<g >
+<title>tinymesh::Vertex::degree (30,303,030 samples, 1.15%)</title><rect x="437.9" y="581" width="13.5" height="15.0" fill="rgb(247,193,46)" rx="2" ry="2" />
+<text  x="440.86" y="591.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (10,101,010 samples, 0.38%)</title><rect x="775.6" y="549" width="4.6" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="778.65" y="559.5" ></text>
+</g>
+<g >
+<title>bpf_trampoline_6442519396 (10,101,010 samples, 0.38%)</title><rect x="46.0" y="469" width="4.5" height="15.0" fill="rgb(207,10,2)" rx="2" ry="2" />
+<text  x="49.03" y="479.5" ></text>
+</g>
+<g >
+<title>Eigen::internal::dense_assignment_loop&lt;Eigen::internal::generic_dense_assignment_kernel&lt;Eigen::internal::evaluator&lt;Eigen::Block&lt;Eigen::Ref&lt;Eigen::Matrix&lt;double, 4, 4, 0, 4, 4&gt;, 0, Eigen::OuterStride&lt;-1&gt; &gt;, -1, -1, false&gt; &gt;, Eigen::internal::evaluator&lt;Eigen::Product&lt;Eigen::Block&lt;Eigen::Block&lt;Eigen::Ref&lt;Eigen::Matrix&lt;double, 4, 4, 0, 4, 4&gt;, 0, Eigen::OuterStride&lt;-1&gt; &gt;, 4, 1, true&gt;, -1, 1, false&gt;, Eigen::Block&lt;Eigen::Block&lt;Eigen::Ref&lt;Eigen::Matrix&lt;double, 4, 4, 0, 4, 4&gt;, 0, Eigen::OuterStride&lt;-1&gt; &gt;, 1, 4, false&gt;, 1, -1, false&gt;, 1&gt; &gt;, Eigen::internal::sub_assign_op&lt;double, double&gt;, 0&gt;, 4, 0&gt;::run (30,303,030 samples, 1.15%)</title><rect x="10.0" y="645" width="13.5" height="15.0" fill="rgb(219,67,16)" rx="2" ry="2" />
+<text  x="13.00" y="655.5" ></text>
+</g>
+<g >
+<title>std::__cxx11::basic_string&lt;char, std::char_traits&lt;char&gt;, std::allocator&lt;char&gt; &gt;::_M_append (10,101,010 samples, 0.38%)</title><rect x="951.3" y="581" width="4.5" height="15.0" fill="rgb(222,79,19)" rx="2" ry="2" />
+<text  x="954.30" y="591.5" ></text>
+</g>
+<g >
+<title>malloc_consolidate (20,202,020 samples, 0.76%)</title><rect x="1131.5" y="597" width="9.0" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="1134.45" y="607.5" ></text>
+</g>
+<g >
+<title>_IO_file_sync@@GLIBC_2.2.5 (10,101,010 samples, 0.38%)</title><rect x="46.0" y="581" width="4.5" height="15.0" fill="rgb(225,92,22)" rx="2" ry="2" />
+<text  x="49.03" y="591.5" ></text>
+</g>
+<g >
+<title>queue_work_on (10,101,010 samples, 0.38%)</title><rect x="46.0" y="293" width="4.5" height="15.0" fill="rgb(248,200,48)" rx="2" ry="2" />
+<text  x="49.03" y="303.5" ></text>
+</g>
+<g >
+<title>vma_alloc_folio (10,101,010 samples, 0.38%)</title><rect x="203.7" y="437" width="4.5" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="206.66" y="447.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::he_begin (10,101,010 samples, 0.38%)</title><rect x="451.4" y="581" width="4.5" height="15.0" fill="rgb(224,89,21)" rx="2" ry="2" />
+<text  x="454.37" y="591.5" ></text>
+</g>
+<g >
+<title>__irq_exit_rcu (10,101,010 samples, 0.38%)</title><rect x="838.7" y="421" width="4.5" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="841.70" y="431.5" ></text>
+</g>
+<g >
+<title>void std::vector&lt;tinymesh::Halfedge*, std::allocator&lt;tinymesh::Halfedge*&gt; &gt;::_M_realloc_insert&lt;tinymesh::Halfedge* const&amp;&gt; (10,101,010 samples, 0.38%)</title><rect x="271.2" y="565" width="4.5" height="15.0" fill="rgb(235,138,33)" rx="2" ry="2" />
+<text  x="274.22" y="575.5" ></text>
+</g>
+<g >
+<title>alloc_pages_mpol (10,101,010 samples, 0.38%)</title><rect x="203.7" y="421" width="4.5" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="206.66" y="431.5" ></text>
+</g>
+<g >
+<title>handle_softirqs (10,101,010 samples, 0.38%)</title><rect x="208.2" y="485" width="4.5" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="211.17" y="495.5" ></text>
+</g>
+<g >
+<title>__netif_receive_skb_list_core (10,101,010 samples, 0.38%)</title><rect x="64.0" y="437" width="4.5" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="67.05" y="447.5" ></text>
+</g>
+<g >
+<title>__mem_cgroup_charge (10,101,010 samples, 0.38%)</title><rect x="744.1" y="453" width="4.5" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="747.12" y="463.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::he_end (10,101,010 samples, 0.38%)</title><rect x="883.7" y="597" width="4.5" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="886.74" y="607.5" ></text>
+</g>
+<g >
+<title>[unknown] (1,050,505,040 samples, 39.69%)</title><rect x="262.2" y="613" width="468.4" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="265.21" y="623.5" >[unknown]</text>
+</g>
+<g >
+<title>[libgomp.so.1.0.0] (20,202,020 samples, 0.76%)</title><rect x="780.2" y="533" width="9.0" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="783.15" y="543.5" ></text>
+</g>
+<g >
+<title>__handle_mm_fault (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="565" width="4.5" height="15.0" fill="rgb(207,9,2)" rx="2" ry="2" />
+<text  x="1048.88" y="575.5" ></text>
+</g>
+<g >
+<title>netif_receive_skb_list_internal (10,101,010 samples, 0.38%)</title><rect x="64.0" y="453" width="4.5" height="15.0" fill="rgb(238,151,36)" rx="2" ry="2" />
+<text  x="67.05" y="463.5" ></text>
+</g>
+<g >
+<title>asm_common_interrupt (10,101,010 samples, 0.38%)</title><rect x="838.7" y="469" width="4.5" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="841.70" y="479.5" ></text>
+</g>
+<g >
+<title>handle_softirqs (10,101,010 samples, 0.38%)</title><rect x="64.0" y="533" width="4.5" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="67.05" y="543.5" ></text>
+</g>
+<g >
+<title>[libgomp.so.1.0.0] (50,505,050 samples, 1.91%)</title><rect x="1095.4" y="597" width="22.5" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="1098.42" y="607.5" >[..</text>
+</g>
+<g >
+<title>tinymesh::Vertex::ConstHalfedgeIterator::ConstHalfedgeIterator (10,101,010 samples, 0.38%)</title><rect x="284.7" y="581" width="4.5" height="15.0" fill="rgb(240,161,38)" rx="2" ry="2" />
+<text  x="287.73" y="591.5" ></text>
+</g>
+<g >
+<title>folio_batch_move_lru (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="485" width="4.5" height="15.0" fill="rgb(207,10,2)" rx="2" ry="2" />
+<text  x="1048.88" y="495.5" ></text>
+</g>
+<g >
+<title>[libgomp.so.1.0.0] (10,101,010 samples, 0.38%)</title><rect x="1176.5" y="629" width="4.5" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="1179.49" y="639.5" ></text>
+</g>
+<g >
+<title>void std::vector&lt;tinymesh::QEMNode, std::allocator&lt;tinymesh::QEMNode&gt; &gt;::_M_realloc_insert&lt;tinymesh::QEMNode&gt; (10,101,010 samples, 0.38%)</title><rect x="1032.4" y="629" width="4.5" height="15.0" fill="rgb(247,193,46)" rx="2" ry="2" />
+<text  x="1035.37" y="639.5" ></text>
+</g>
+<g >
+<title>handle_mm_fault (10,101,010 samples, 0.38%)</title><rect x="203.7" y="517" width="4.5" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="206.66" y="527.5" ></text>
+</g>
+<g >
+<title>void std::vector&lt;std::shared_ptr&lt;tinymesh::Halfedge&gt;, std::allocator&lt;std::shared_ptr&lt;tinymesh::Halfedge&gt; &gt; &gt;::_M_realloc_insert&lt;tinymesh::Halfedge*&amp;&gt; (10,101,010 samples, 0.38%)</title><rect x="266.7" y="565" width="4.5" height="15.0" fill="rgb(237,149,35)" rx="2" ry="2" />
+<text  x="269.72" y="575.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::construct (40,404,040 samples, 1.53%)</title><rect x="730.6" y="629" width="18.0" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="733.61" y="639.5" ></text>
+</g>
+<g >
+<title>tcp_rcv_established (10,101,010 samples, 0.38%)</title><rect x="838.7" y="165" width="4.5" height="15.0" fill="rgb(242,170,40)" rx="2" ry="2" />
+<text  x="841.70" y="175.5" ></text>
+</g>
+<g >
+<title>std::_Function_handler&lt;void  (10,101,010 samples, 0.38%)</title><rect x="113.6" y="629" width="4.5" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="116.59" y="639.5" ></text>
+</g>
+<g >
+<title>ip_list_rcv (10,101,010 samples, 0.38%)</title><rect x="838.7" y="293" width="4.5" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="841.70" y="303.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::holeFillMinDihedral_ (10,101,010 samples, 0.38%)</title><rect x="847.7" y="581" width="4.5" height="15.0" fill="rgb(245,187,44)" rx="2" ry="2" />
+<text  x="850.71" y="591.5" ></text>
+</g>
+<g >
+<title>skb_release_data (10,101,010 samples, 0.38%)</title><rect x="838.7" y="101" width="4.5" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="841.70" y="111.5" ></text>
+</g>
+<g >
+<title>tcp_clean_rtx_queue.constprop.0 (10,101,010 samples, 0.38%)</title><rect x="838.7" y="133" width="4.5" height="15.0" fill="rgb(211,30,7)" rx="2" ry="2" />
+<text  x="841.70" y="143.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::isHole (10,101,010 samples, 0.38%)</title><rect x="248.7" y="597" width="4.5" height="15.0" fill="rgb(249,204,48)" rx="2" ry="2" />
+<text  x="251.70" y="607.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::ConstHalfedgeIterator::operator++ (50,505,050 samples, 1.91%)</title><rect x="861.2" y="597" width="22.5" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="864.22" y="607.5" >t..</text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="275.7" y="549" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="278.73" y="559.5" ></text>
+</g>
+<g >
+<title>common_interrupt (10,101,010 samples, 0.38%)</title><rect x="838.7" y="453" width="4.5" height="15.0" fill="rgb(215,46,11)" rx="2" ry="2" />
+<text  x="841.70" y="463.5" ></text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="744.1" y="613" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="747.12" y="623.5" ></text>
+</g>
+<g >
+<title>_int_free (20,202,020 samples, 0.76%)</title><rect x="1167.5" y="613" width="9.0" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="1170.48" y="623.5" ></text>
+</g>
+<g >
+<title>[unknown] (80,808,080 samples, 3.05%)</title><rect x="226.2" y="613" width="36.0" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="229.18" y="623.5" >[un..</text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="271.2" y="549" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="274.22" y="559.5" ></text>
+</g>
+<g >
+<title>get_page_from_freelist (10,101,010 samples, 0.38%)</title><rect x="203.7" y="389" width="4.5" height="15.0" fill="rgb(252,218,52)" rx="2" ry="2" />
+<text  x="206.66" y="399.5" ></text>
+</g>
+<g >
+<title>tcp_v4_do_rcv (10,101,010 samples, 0.38%)</title><rect x="838.7" y="181" width="4.5" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="841.70" y="191.5" ></text>
+</g>
+<g >
+<title>_int_malloc (20,202,020 samples, 0.76%)</title><rect x="1131.5" y="613" width="9.0" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="1134.45" y="623.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::HalfedgeIterator::operator++ (20,202,020 samples, 0.76%)</title><rect x="748.6" y="629" width="9.0" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="751.63" y="639.5" ></text>
+</g>
+<g >
+<title>_int_malloc (10,101,010 samples, 0.38%)</title><rect x="266.7" y="517" width="4.5" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="269.72" y="527.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree&lt;std::pair&lt;unsigned int, unsigned int&gt;, std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt;, std::_Select1st&lt;std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt; &gt;, std::less&lt;std::pair&lt;unsigned int, unsigned int&gt; &gt;, std::allocator&lt;std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt; &gt; &gt;::_M_erase (20,202,020 samples, 0.76%)</title><rect x="118.1" y="629" width="9.0" height="15.0" fill="rgb(212,34,8)" rx="2" ry="2" />
+<text  x="121.09" y="639.5" ></text>
+</g>
+<g >
+<title>[libgomp.so.1.0.0] (20,202,020 samples, 0.76%)</title><rect x="780.2" y="549" width="9.0" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="783.15" y="559.5" ></text>
+</g>
+<g >
+<title>__memmove_evex_unaligned_erms (10,101,010 samples, 0.38%)</title><rect x="109.1" y="629" width="4.5" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="112.08" y="639.5" ></text>
+</g>
+<g >
+<title>malloc (121,212,120 samples, 4.58%)</title><rect x="789.2" y="533" width="54.0" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="792.16" y="543.5" >malloc</text>
+</g>
+<g >
+<title>unlink_chunk.isra.0 (10,101,010 samples, 0.38%)</title><rect x="775.6" y="485" width="4.6" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="778.65" y="495.5" ></text>
+</g>
+<g >
+<title>[unknown] (10,101,010 samples, 0.38%)</title><rect x="190.2" y="613" width="4.5" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="193.15" y="623.5" ></text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="271.2" y="533" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="274.22" y="543.5" ></text>
+</g>
+<g >
+<title>tinymesh::simplifyQEM (50,505,050 samples, 1.91%)</title><rect x="969.3" y="629" width="22.5" height="15.0" fill="rgb(241,167,39)" rx="2" ry="2" />
+<text  x="972.31" y="639.5" >t..</text>
+</g>
+<g >
+<title> (101,010,100 samples, 3.82%)</title><rect x="392.8" y="565" width="45.1" height="15.0" fill="rgb(232,128,30)" rx="2" ry="2" />
+<text  x="395.82" y="575.5" ></text>
+</g>
+<g >
+<title>handle_mm_fault (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="581" width="4.5" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="1048.88" y="591.5" ></text>
+</g>
+<g >
+<title>handle_softirqs (10,101,010 samples, 0.38%)</title><rect x="109.1" y="469" width="4.5" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="112.08" y="479.5" ></text>
+</g>
+<g >
+<title>pty_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="325" width="4.5" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="49.03" y="335.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::ConstVertexIterator::operator (10,101,010 samples, 0.38%)</title><rect x="226.2" y="597" width="4.5" height="15.0" fill="rgb(231,121,29)" rx="2" ry="2" />
+<text  x="229.18" y="607.5" ></text>
+</g>
+<g >
+<title>_raw_spin_unlock_irqrestore (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="469" width="4.5" height="15.0" fill="rgb(228,106,25)" rx="2" ry="2" />
+<text  x="1048.88" y="479.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree&lt;tinymesh::Vertex*, tinymesh::Vertex*, std::_Identity&lt;tinymesh::Vertex*&gt;, std::less&lt;tinymesh::Vertex*&gt;, std::allocator&lt;tinymesh::Vertex*&gt; &gt;::_M_erase (20,202,020 samples, 0.76%)</title><rect x="852.2" y="597" width="9.0" height="15.0" fill="rgb(211,30,7)" rx="2" ry="2" />
+<text  x="855.21" y="607.5" ></text>
+</g>
+<g >
+<title>asm_common_interrupt (10,101,010 samples, 0.38%)</title><rect x="64.0" y="597" width="4.5" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="67.05" y="607.5" ></text>
+</g>
+<g >
+<title>void std::vector&lt;Vec&lt;double, 3&gt;, std::allocator&lt;Vec&lt;double, 3&gt; &gt; &gt;::_M_realloc_insert&lt;Vec&lt;double, 3&gt; &gt; (50,505,050 samples, 1.91%)</title><rect x="1009.8" y="629" width="22.6" height="15.0" fill="rgb(238,153,36)" rx="2" ry="2" />
+<text  x="1012.85" y="639.5" >v..</text>
+</g>
+<g >
+<title>n_tty_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="357" width="4.5" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="49.03" y="367.5" ></text>
+</g>
+<g >
+<title>exc_page_fault (10,101,010 samples, 0.38%)</title><rect x="109.1" y="597" width="4.5" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="112.08" y="607.5" ></text>
+</g>
+<g >
+<title>irq_exit_rcu (10,101,010 samples, 0.38%)</title><rect x="838.7" y="437" width="4.5" height="15.0" fill="rgb(254,227,54)" rx="2" ry="2" />
+<text  x="841.70" y="447.5" ></text>
+</g>
+<g >
+<title>_int_free_maybe_consolidate (10,101,010 samples, 0.38%)</title><rect x="775.6" y="517" width="4.6" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="778.65" y="527.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::~Vertex (444,444,440 samples, 16.79%)</title><rect x="757.6" y="629" width="198.2" height="15.0" fill="rgb(216,54,13)" rx="2" ry="2" />
+<text  x="760.63" y="639.5" >tinymesh::Vertex::~Vertex</text>
+</g>
+<g >
+<title>ip_protocol_deliver_rcu (10,101,010 samples, 0.38%)</title><rect x="838.7" y="213" width="4.5" height="15.0" fill="rgb(215,49,11)" rx="2" ry="2" />
+<text  x="841.70" y="223.5" ></text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="555.0" y="581" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="557.96" y="591.5" ></text>
+</g>
+<g >
+<title>_int_malloc (20,202,020 samples, 0.76%)</title><rect x="212.7" y="581" width="9.0" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="215.67" y="591.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::addHalfedge (10,101,010 samples, 0.38%)</title><rect x="555.0" y="597" width="4.5" height="15.0" fill="rgb(225,96,23)" rx="2" ry="2" />
+<text  x="557.96" y="607.5" ></text>
+</g>
+<g >
+<title>unlink_chunk.isra.0 (10,101,010 samples, 0.38%)</title><rect x="1172.0" y="565" width="4.5" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1174.98" y="575.5" ></text>
+</g>
+<g >
+<title>do_user_addr_fault (20,202,020 samples, 0.76%)</title><rect x="199.2" y="533" width="9.0" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="202.16" y="543.5" ></text>
+</g>
+<g >
+<title>tinymesh::simplifyQEM (60,606,060 samples, 2.29%)</title><rect x="928.8" y="597" width="27.0" height="15.0" fill="rgb(241,167,39)" rx="2" ry="2" />
+<text  x="931.78" y="607.5" >t..</text>
+</g>
+<g >
+<title>__folio_put (10,101,010 samples, 0.38%)</title><rect x="838.7" y="85" width="4.5" height="15.0" fill="rgb(224,91,21)" rx="2" ry="2" />
+<text  x="841.70" y="95.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::isBoundary (90,909,090 samples, 3.44%)</title><rect x="888.2" y="597" width="40.6" height="15.0" fill="rgb(230,117,28)" rx="2" ry="2" />
+<text  x="891.24" y="607.5" >tin..</text>
+</g>
+<g >
+<title>[unknown] (131,313,130 samples, 4.96%)</title><rect x="50.5" y="629" width="58.6" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="53.53" y="639.5" >[unkno..</text>
+</g>
+<g >
+<title>asm_common_interrupt (10,101,010 samples, 0.38%)</title><rect x="208.2" y="549" width="4.5" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="211.17" y="559.5" ></text>
+</g>
+<g >
+<title>PrintStream::flush (10,101,010 samples, 0.38%)</title><rect x="1050.4" y="629" width="4.5" height="15.0" fill="rgb(240,163,39)" rx="2" ry="2" />
+<text  x="1053.38" y="639.5" ></text>
+</g>
+<g >
+<title>tinymesh::Mesh::removeFace (10,101,010 samples, 0.38%)</title><rect x="771.1" y="565" width="4.5" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="774.15" y="575.5" ></text>
+</g>
+<g >
+<title>handle_pte_fault (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="549" width="4.5" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="1048.88" y="559.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree_decrement (10,101,010 samples, 0.38%)</title><rect x="546.0" y="597" width="4.5" height="15.0" fill="rgb(238,152,36)" rx="2" ry="2" />
+<text  x="548.95" y="607.5" ></text>
+</g>
+<g >
+<title>net_rx_action (10,101,010 samples, 0.38%)</title><rect x="64.0" y="517" width="4.5" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="67.05" y="527.5" ></text>
+</g>
+<g >
+<title>_int_free (10,101,010 samples, 0.38%)</title><rect x="775.6" y="533" width="4.6" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="778.65" y="543.5" ></text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="555.0" y="565" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="557.96" y="575.5" ></text>
+</g>
+<g >
+<title>tinymesh::smoothTaubin (141,414,140 samples, 5.34%)</title><rect x="780.2" y="565" width="63.0" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="783.15" y="575.5" >tinyme..</text>
+</g>
+<g >
+<title>tinymesh::Face::~Face (80,808,080 samples, 3.05%)</title><rect x="226.2" y="629" width="36.0" height="15.0" fill="rgb(218,60,14)" rx="2" ry="2" />
+<text  x="229.18" y="639.5" >tin..</text>
+</g>
+<g >
+<title>napi_complete_done (10,101,010 samples, 0.38%)</title><rect x="838.7" y="341" width="4.5" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="841.70" y="351.5" ></text>
+</g>
+<g >
+<title>vmxnet3_poll_rx_only (10,101,010 samples, 0.38%)</title><rect x="838.7" y="357" width="4.5" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="841.70" y="367.5" ></text>
+</g>
+<g >
+<title>ip_sublist_rcv (10,101,010 samples, 0.38%)</title><rect x="838.7" y="277" width="4.5" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="841.70" y="287.5" ></text>
+</g>
+<g >
+<title>__irq_exit_rcu (10,101,010 samples, 0.38%)</title><rect x="64.0" y="549" width="4.5" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="67.05" y="559.5" ></text>
+</g>
+<g >
+<title>__rmqueue_pcplist (10,101,010 samples, 0.38%)</title><rect x="203.7" y="357" width="4.5" height="15.0" fill="rgb(230,118,28)" rx="2" ry="2" />
+<text  x="206.66" y="367.5" ></text>
+</g>
+<g >
+<title>tcp_ack (10,101,010 samples, 0.38%)</title><rect x="838.7" y="149" width="4.5" height="15.0" fill="rgb(230,115,27)" rx="2" ry="2" />
+<text  x="841.70" y="159.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::VertexIterator::operator (101,010,100 samples, 3.82%)</title><rect x="392.8" y="581" width="45.1" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="395.82" y="591.5" >tiny..</text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="1032.4" y="613" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="1035.37" y="623.5" ></text>
+</g>
+<g >
+<title>do_user_addr_fault (10,101,010 samples, 0.38%)</title><rect x="109.1" y="581" width="4.5" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="112.08" y="591.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (10,101,010 samples, 0.38%)</title><rect x="1050.4" y="645" width="4.5" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="1053.38" y="655.5" ></text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="744.1" y="597" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="747.12" y="607.5" ></text>
+</g>
+<g >
+<title>Eigen::internal::triangular_solver_unroller&lt;Eigen::Matrix&lt;double, 4, 4, 0, 4, 4&gt; const, Eigen::Matrix&lt;double, 4, 1, 0, 4, 1&gt;, 2, 1, 4, false&gt;::run (30,303,030 samples, 1.15%)</title><rect x="32.5" y="629" width="13.5" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="35.52" y="639.5" ></text>
+</g>
+<g >
+<title>std::istream::read (10,101,010 samples, 0.38%)</title><rect x="113.6" y="613" width="4.5" height="15.0" fill="rgb(225,92,22)" rx="2" ry="2" />
+<text  x="116.59" y="623.5" ></text>
+</g>
+<g >
+<title>do_anonymous_page (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="533" width="4.5" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="1048.88" y="543.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree&lt;std::pair&lt;unsigned int, unsigned int&gt;, std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt;, std::_Select1st&lt;std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt; &gt;, std::less&lt;std::pair&lt;unsigned int, unsigned int&gt; &gt;, std::allocator&lt;std::pair&lt;std::pair&lt;unsigned int, unsigned int&gt; const, tinymesh::Halfedge*&gt; &gt; &gt;::find (30,303,030 samples, 1.15%)</title><rect x="527.9" y="597" width="13.6" height="15.0" fill="rgb(254,226,54)" rx="2" ry="2" />
+<text  x="530.94" y="607.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree_insert_and_rebalance (10,101,010 samples, 0.38%)</title><rect x="550.5" y="597" width="4.5" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="553.46" y="607.5" ></text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="987.3" y="613" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="990.33" y="623.5" ></text>
+</g>
+<g >
+<title>ip_sublist_rcv_finish (10,101,010 samples, 0.38%)</title><rect x="838.7" y="261" width="4.5" height="15.0" fill="rgb(241,168,40)" rx="2" ry="2" />
+<text  x="841.70" y="271.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::v_end (10,101,010 samples, 0.38%)</title><rect x="766.6" y="565" width="4.5" height="15.0" fill="rgb(217,59,14)" rx="2" ry="2" />
+<text  x="769.64" y="575.5" ></text>
+</g>
+<g >
+<title>entry_SYSCALL_64_after_hwframe (10,101,010 samples, 0.38%)</title><rect x="46.0" y="517" width="4.5" height="15.0" fill="rgb(218,63,15)" rx="2" ry="2" />
+<text  x="49.03" y="527.5" ></text>
+</g>
+<g >
+<title>example_simplif (2,646,464,620 samples, 100.00%)</title><rect x="10.0" y="661" width="1180.0" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="13.00" y="671.5" >example_simplif</text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (20,202,020 samples, 0.76%)</title><rect x="1167.5" y="629" width="9.0" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="1170.48" y="639.5" ></text>
+</g>
+<g >
+<title>operator new (121,212,120 samples, 4.58%)</title><rect x="789.2" y="549" width="54.0" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="792.16" y="559.5" >opera..</text>
+</g>
+<g >
+<title>__x64_sys_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="485" width="4.5" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="49.03" y="495.5" ></text>
+</g>
+<g >
+<title>handle_mm_fault (10,101,010 samples, 0.38%)</title><rect x="744.1" y="517" width="4.5" height="15.0" fill="rgb(234,135,32)" rx="2" ry="2" />
+<text  x="747.12" y="527.5" ></text>
+</g>
+<g >
+<title>asm_exc_page_fault (10,101,010 samples, 0.38%)</title><rect x="109.1" y="613" width="4.5" height="15.0" fill="rgb(225,93,22)" rx="2" ry="2" />
+<text  x="112.08" y="623.5" ></text>
+</g>
+<g >
+<title>operator new (20,202,020 samples, 0.76%)</title><rect x="212.7" y="613" width="9.0" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="215.67" y="623.5" ></text>
+</g>
+<g >
+<title>std::pair&lt;std::__detail::_Node_iterator&lt;std::pair&lt;tinymesh::Halfedge* const, std::pair&lt;unsigned int, unsigned int&gt; &gt;, false, false&gt;, bool&gt; std::_Hashtable&lt;tinymesh::Halfedge*, std::pair&lt;tinymesh::Halfedge* const, std::pair&lt;unsigned int, unsigned int&gt; &gt;, std::allocator&lt;std::pair&lt;tinymesh::Halfedge* const, std::pair&lt;unsigned int, unsigned int&gt; &gt; &gt;, std::__detail::_Select1st, std::equal_to&lt;tinymesh::Halfedge*&gt;, std::hash&lt;tinymesh::Halfedge*&gt;, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits&lt;false, false, true&gt; &gt;::_M_emplace&lt;std::pair&lt;tinymesh::Halfedge*, std::pair&lt;unsigned int, unsigned int&gt; &gt; &gt; (10,101,010 samples, 0.38%)</title><rect x="275.7" y="581" width="4.5" height="15.0" fill="rgb(245,186,44)" rx="2" ry="2" />
+<text  x="278.73" y="591.5" ></text>
+</g>
+<g >
+<title>ip_sublist_rcv (10,101,010 samples, 0.38%)</title><rect x="64.0" y="405" width="4.5" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="67.05" y="415.5" ></text>
+</g>
+<g >
+<title>__ieee754_acos_fma (20,202,020 samples, 0.76%)</title><rect x="1122.4" y="629" width="9.1" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="1125.44" y="639.5" ></text>
+</g>
+<g >
+<title>__irq_exit_rcu (10,101,010 samples, 0.38%)</title><rect x="208.2" y="501" width="4.5" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="211.17" y="511.5" ></text>
+</g>
+<g >
+<title>vmxnet3_poll_rx_only (10,101,010 samples, 0.38%)</title><rect x="64.0" y="485" width="4.5" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="67.05" y="495.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::ConstHalfedgeIterator::operator++ (212,121,210 samples, 8.02%)</title><rect x="289.2" y="581" width="94.6" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="292.24" y="591.5" >tinymesh::V..</text>
+</g>
+<g >
+<title>malloc_consolidate (90,909,090 samples, 3.44%)</title><rect x="802.7" y="501" width="40.5" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="805.67" y="511.5" >mal..</text>
+</g>
+<g >
+<title>PrintStream::flush (10,101,010 samples, 0.38%)</title><rect x="46.0" y="629" width="4.5" height="15.0" fill="rgb(240,163,39)" rx="2" ry="2" />
+<text  x="49.03" y="639.5" ></text>
+</g>
+<g >
+<title>std::basic_ios&lt;char, std::char_traits&lt;char&gt; &gt;::init (10,101,010 samples, 0.38%)</title><rect x="946.8" y="565" width="4.5" height="15.0" fill="rgb(206,7,1)" rx="2" ry="2" />
+<text  x="949.79" y="575.5" ></text>
+</g>
+<g >
+<title>_int_malloc (10,101,010 samples, 0.38%)</title><rect x="847.7" y="533" width="4.5" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="850.71" y="543.5" ></text>
+</g>
+<g >
+<title>ipv4_conntrack_in (10,101,010 samples, 0.38%)</title><rect x="64.0" y="357" width="4.5" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="67.05" y="367.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::v_begin (10,101,010 samples, 0.38%)</title><rect x="221.7" y="629" width="4.5" height="15.0" fill="rgb(237,148,35)" rx="2" ry="2" />
+<text  x="224.68" y="639.5" ></text>
+</g>
+<g >
+<title>tinymesh::smoothLaplacian (40,404,040 samples, 1.53%)</title><rect x="991.8" y="629" width="18.0" height="15.0" fill="rgb(250,208,49)" rx="2" ry="2" />
+<text  x="994.83" y="639.5" ></text>
+</g>
+<g >
+<title>asm_exc_page_fault (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="629" width="4.5" height="15.0" fill="rgb(225,93,22)" rx="2" ry="2" />
+<text  x="1048.88" y="639.5" ></text>
+</g>
+<g >
+<title>asm_exc_page_fault (10,101,010 samples, 0.38%)</title><rect x="744.1" y="565" width="4.5" height="15.0" fill="rgb(225,93,22)" rx="2" ry="2" />
+<text  x="747.12" y="575.5" ></text>
+</g>
+<g >
+<title>tcp_v4_rcv (10,101,010 samples, 0.38%)</title><rect x="838.7" y="197" width="4.5" height="15.0" fill="rgb(237,148,35)" rx="2" ry="2" />
+<text  x="841.70" y="207.5" ></text>
+</g>
+<g >
+<title>_int_free (20,202,020 samples, 0.76%)</title><rect x="757.6" y="533" width="9.0" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="760.63" y="543.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (30,303,030 samples, 1.15%)</title><rect x="1014.4" y="613" width="13.5" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="1017.35" y="623.5" ></text>
+</g>
+<g >
+<title>unlink_chunk.isra.0 (10,101,010 samples, 0.38%)</title><rect x="217.2" y="565" width="4.5" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="220.18" y="575.5" ></text>
+</g>
+<g >
+<title>ksys_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="437" width="4.5" height="15.0" fill="rgb(205,4,1)" rx="2" ry="2" />
+<text  x="49.03" y="447.5" ></text>
+</g>
+<g >
+<title>Vec&lt;double, 3&gt; normalize&lt;double, 3&gt; (10,101,010 samples, 0.38%)</title><rect x="262.2" y="597" width="4.5" height="15.0" fill="rgb(226,100,24)" rx="2" ry="2" />
+<text  x="265.21" y="607.5" ></text>
+</g>
+<g >
+<title>std::_Sp_counted_base&lt; (20,202,020 samples, 0.76%)</title><rect x="757.6" y="565" width="9.0" height="15.0" fill="rgb(211,31,7)" rx="2" ry="2" />
+<text  x="760.63" y="575.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::VertexIterator::operator++ (10,101,010 samples, 0.38%)</title><rect x="388.3" y="581" width="4.5" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="391.32" y="591.5" ></text>
+</g>
+<g >
+<title>std::set&lt;tinymesh::Vertex*, std::less&lt;tinymesh::Vertex*&gt;, std::allocator&lt;tinymesh::Vertex*&gt; &gt;::set&lt;__gnu_cxx::__normal_iterator&lt;tinymesh::Vertex**, std::vector&lt;tinymesh::Vertex*, std::allocator&lt;tinymesh::Vertex*&gt; &gt; &gt; &gt; (20,202,020 samples, 0.76%)</title><rect x="212.7" y="629" width="9.0" height="15.0" fill="rgb(208,16,3)" rx="2" ry="2" />
+<text  x="215.67" y="639.5" ></text>
+</g>
+<g >
+<title>tinymesh::Face::v_begin (10,101,010 samples, 0.38%)</title><rect x="257.7" y="597" width="4.5" height="15.0" fill="rgb(237,148,35)" rx="2" ry="2" />
+<text  x="260.71" y="607.5" ></text>
+</g>
+<g >
+<title>__napi_poll (10,101,010 samples, 0.38%)</title><rect x="64.0" y="501" width="4.5" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="67.05" y="511.5" ></text>
+</g>
+<g >
+<title>_int_malloc (10,101,010 samples, 0.38%)</title><rect x="271.2" y="517" width="4.5" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="274.22" y="527.5" ></text>
+</g>
+<g >
+<title>clone3 (141,414,140 samples, 5.34%)</title><rect x="1054.9" y="645" width="63.0" height="15.0" fill="rgb(216,54,12)" rx="2" ry="2" />
+<text  x="1057.89" y="655.5" >clone3</text>
+</g>
+<g >
+<title>napi_complete_done (10,101,010 samples, 0.38%)</title><rect x="64.0" y="469" width="4.5" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="67.05" y="479.5" ></text>
+</g>
+<g >
+<title>operator new (10,101,010 samples, 0.38%)</title><rect x="266.7" y="549" width="4.5" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="269.72" y="559.5" ></text>
+</g>
+<g >
+<title>tinymesh::Halfedge::~Halfedge (1,050,505,040 samples, 39.69%)</title><rect x="262.2" y="629" width="468.4" height="15.0" fill="rgb(230,117,28)" rx="2" ry="2" />
+<text  x="265.21" y="639.5" >tinymesh::Halfedge::~Halfedge</text>
+</g>
+<g >
+<title>exc_page_fault (10,101,010 samples, 0.38%)</title><rect x="744.1" y="549" width="4.5" height="15.0" fill="rgb(212,35,8)" rx="2" ry="2" />
+<text  x="747.12" y="559.5" ></text>
+</g>
+<g >
+<title>folio_add_lru (10,101,010 samples, 0.38%)</title><rect x="1045.9" y="501" width="4.5" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="1048.88" y="511.5" ></text>
+</g>
+<g >
+<title>malloc (10,101,010 samples, 0.38%)</title><rect x="987.3" y="597" width="4.5" height="15.0" fill="rgb(230,119,28)" rx="2" ry="2" />
+<text  x="990.33" y="607.5" ></text>
+</g>
+<g >
+<title>__x64_sys_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="453" width="4.5" height="15.0" fill="rgb(246,189,45)" rx="2" ry="2" />
+<text  x="49.03" y="463.5" ></text>
+</g>
+<g >
+<title>nf_hook_slow_list (10,101,010 samples, 0.38%)</title><rect x="64.0" y="389" width="4.5" height="15.0" fill="rgb(211,29,6)" rx="2" ry="2" />
+<text  x="67.05" y="399.5" ></text>
+</g>
+<g >
+<title>_int_free (30,303,030 samples, 1.15%)</title><rect x="1014.4" y="597" width="13.5" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="1017.35" y="607.5" ></text>
+</g>
+<g >
+<title>asm_common_interrupt (10,101,010 samples, 0.38%)</title><rect x="109.1" y="533" width="4.5" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="112.08" y="543.5" ></text>
+</g>
+<g >
+<title>[unknown] (212,121,210 samples, 8.02%)</title><rect x="757.6" y="597" width="94.6" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="760.63" y="607.5" >[unknown]</text>
+</g>
+<g >
+<title>tty_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="405" width="4.5" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="49.03" y="415.5" ></text>
+</g>
+<g >
+<title>cfree@GLIBC_2.2.5 (10,101,010 samples, 0.38%)</title><rect x="50.5" y="613" width="4.5" height="15.0" fill="rgb(233,131,31)" rx="2" ry="2" />
+<text  x="53.53" y="623.5" ></text>
+</g>
+<g >
+<title>std::_Rb_tree&lt;tinymesh::Halfedge*, tinymesh::Halfedge*, std::_Identity&lt;tinymesh::Halfedge*&gt;, std::less&lt;tinymesh::Halfedge*&gt;, std::allocator&lt;tinymesh::Halfedge*&gt; &gt;::_M_get_insert_unique_pos (10,101,010 samples, 0.38%)</title><rect x="541.5" y="597" width="4.5" height="15.0" fill="rgb(212,33,7)" rx="2" ry="2" />
+<text  x="544.45" y="607.5" ></text>
+</g>
+<g >
+<title>std::ostream::flush (10,101,010 samples, 0.38%)</title><rect x="46.0" y="613" width="4.5" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="49.03" y="623.5" ></text>
+</g>
+<g >
+<title>iterate_tty_write (10,101,010 samples, 0.38%)</title><rect x="46.0" y="373" width="4.5" height="15.0" fill="rgb(225,95,22)" rx="2" ry="2" />
+<text  x="49.03" y="383.5" ></text>
+</g>
+<g >
+<title>do_anonymous_page (10,101,010 samples, 0.38%)</title><rect x="203.7" y="469" width="4.5" height="15.0" fill="rgb(238,155,37)" rx="2" ry="2" />
+<text  x="206.66" y="479.5" ></text>
+</g>
+<g >
+<title>operator new (20,202,020 samples, 0.76%)</title><rect x="199.2" y="613" width="9.0" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="202.16" y="623.5" ></text>
+</g>
+<g >
+<title>tinymesh::Vertex::he_end (60,606,060 samples, 2.29%)</title><rect x="455.9" y="581" width="27.0" height="15.0" fill="rgb(205,1,0)" rx="2" ry="2" />
+<text  x="458.88" y="591.5" >t..</text>
+</g>
+<g >
+<title>__handle_mm_fault (10,101,010 samples, 0.38%)</title><rect x="109.1" y="549" width="4.5" height="15.0" fill="rgb(207,9,2)" rx="2" ry="2" />
+<text  x="112.08" y="559.5" ></text>
+</g>
+<g >
+<title>tinymesh::remeshTriangular (10,101,010 samples, 0.38%)</title><rect x="964.8" y="629" width="4.5" height="15.0" fill="rgb(236,144,34)" rx="2" ry="2" />
+<text  x="967.81" y="639.5" ></text>
+</g>
+<g >
+<title>nf_conntrack_in (10,101,010 samples, 0.38%)</title><rect x="64.0" y="341" width="4.5" height="15.0" fill="rgb(206,8,2)" rx="2" ry="2" />
+<text  x="67.05" y="351.5" ></text>
+</g>
+<g >
+<title>free_unref_page (10,101,010 samples, 0.38%)</title><rect x="838.7" y="53" width="4.5" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="841.70" y="63.5" ></text>
+</g>
+<g >
+<title>_int_malloc (10,101,010 samples, 0.38%)</title><rect x="275.7" y="533" width="4.5" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="278.73" y="543.5" ></text>
+</g>
+<g >
+<title>_int_free_maybe_consolidate (20,202,020 samples, 0.76%)</title><rect x="1167.5" y="597" width="9.0" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="1170.48" y="607.5" ></text>
+</g>
+<g >
+<title>_int_free (10,101,010 samples, 0.38%)</title><rect x="856.7" y="565" width="4.5" height="15.0" fill="rgb(247,196,46)" rx="2" ry="2" />
+<text  x="859.72" y="575.5" ></text>
+</g>
+<g >
+<title>std::__detail::_Map_base&lt;Vec&lt;double, 3&gt;, std::pair&lt;Vec&lt;double, 3&gt; const, unsigned int&gt;, std::allocator&lt;std::pair&lt;Vec&lt;double, 3&gt; const, unsigned int&gt; &gt;, std::__detail::_Select1st, std::equal_to&lt;Vec&lt;double, 3&gt; &gt;, std::hash&lt;Vec&lt;double, 3&gt; &gt;, std::__detail::_Mod_range_hashing, std::__detail::_Default_ranged_hash, std::__detail::_Prime_rehash_policy, std::__detail::_Hashtable_traits&lt;true, false, true&gt;, true&gt;::operator[] (30,303,030 samples, 1.15%)</title><rect x="194.7" y="629" width="13.5" height="15.0" fill="rgb(233,132,31)" rx="2" ry="2" />
+<text  x="197.66" y="639.5" ></text>
+</g>
+<g >
+<title>__netif_receive_skb_list_core (10,101,010 samples, 0.38%)</title><rect x="838.7" y="309" width="4.5" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="841.70" y="319.5" ></text>
+</g>
+<g >
+<title>rmqueue (10,101,010 samples, 0.38%)</title><rect x="203.7" y="373" width="4.5" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="206.66" y="383.5" ></text>
+</g>
+<g >
+<title>[unknown] (585,858,580 samples, 22.14%)</title><rect x="266.7" y="597" width="261.2" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="269.72" y="607.5" >[unknown]</text>
+</g>
+<g >
+<title>nf_conntrack_tcp_packet (10,101,010 samples, 0.38%)</title><rect x="64.0" y="325" width="4.5" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="67.05" y="335.5" ></text>
+</g>
+<g >
+<title>get_pfnblock_flags_mask (10,101,010 samples, 0.38%)</title><rect x="838.7" y="37" width="4.5" height="15.0" fill="rgb(227,103,24)" rx="2" ry="2" />
+<text  x="841.70" y="47.5" ></text>
+</g>
+</g>
+</svg>
