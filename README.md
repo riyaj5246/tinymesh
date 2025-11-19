@@ -66,6 +66,10 @@ Run examples
 
 ```shell
 ./build/bin/example_simplify data/models/bunny.ply
+./build/bin/example_denoise data/models/bunny.ply
+./build/bin/example_read_write data/models/bunny.ply
+./build/bin/example_remesh data/models/bunny.ply
+./build/bin/example_smooth data/models/bunny.ply
 ```
 
 Gallery
