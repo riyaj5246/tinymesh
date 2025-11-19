@@ -36,6 +36,30 @@ target_link_libraries(
     ${CXX_FS_LIBRARY}
     ${OpenMP_LIBRARIES})
 
+# Optional faster allocator linking (jemalloc / tcmalloc)
+option(USE_JEMALLOC "Link with jemalloc to improve allocator performance" OFF)
+option(USE_TCMALLOC "Link with tcmalloc to improve allocator performance" OFF)
+
+if (USE_JEMALLOC)
+    find_library(JEMALLOC_LIB jemalloc)
+    if (JEMALLOC_LIB)
+        message(STATUS "Linking jemalloc: ${JEMALLOC_LIB}")
+        target_link_libraries(${TINYMESH_LIBRARY} PUBLIC ${JEMALLOC_LIB})
+        target_compile_definitions(${TINYMESH_LIBRARY} PUBLIC USE_JEMALLOC)
+    else()
+        message(WARNING "jemalloc requested but not found. Proceeding without it.")
+    endif()
+elseif(USE_TCMALLOC)
+    find_library(TCMALLOC_LIB tcmalloc_minimal tcmalloc)
+    if (TCMALLOC_LIB)
+        message(STATUS "Linking tcmalloc: ${TCMALLOC_LIB}")
+        target_link_libraries(${TINYMESH_LIBRARY} PUBLIC ${TCMALLOC_LIB})
+        target_compile_definitions(${TINYMESH_LIBRARY} PUBLIC USE_TCMALLOC)
+    else()
+        message(WARNING "tcmalloc requested but not found. Proceeding without it.")
+    endif()
+endif()
+
 # Disable warning for external files
 set(WARNING_DISABLED_CXX_FLAGS)
 if (MSVC) 
