@@ -46,12 +46,28 @@ The module is tested its compilation using the following compilers.
 *   **MacOS** - Apple Clang 11.0 (MacOS 11.7)
 *   **Linux** - LLVM Clang 11.0, GNU C Compiler 9.4.0 (Ubuntu 22.04 LTS)
 
+### Branch Info
+
+Successful Optimizations:
+- all: Holds all working optimizations such as unordered map, JEmalloc, and compiler flag optimizations. 
+- compiler_flags: Contains the compiler optimizations in the main CMake file.
+- kmak/allocator: Contains the JEMalloc allocator switching. 
+- unordered_map: Replaces an inefficient data structure with an unordered map
+
+Attempted Optimizations:
+- heap-optimization: Optimized simplify QEM by using an alternative heap construction method.
+- prev: Changes to halfedge.h where we add a previous pointer instead of just traversing the list to get the item before.
+- kmak/remesh-indices-randomization: This branch stores code for the remesh function's randomization indices vector where we replace a custom loop with library functions that do the same thing.
+
+Note: There are other branches that contain other experimental work for you to explore as well.
+
+
 ### Library and examples (C++)
 
-You can build a shared library and all the examples by `CMake` with the following commands.
+You can build a shared library and all the examples by `CMake` with the following commands. We ran and tested our implementation on the CS 598 APE VM.
 
 ```shell
-git clone https://github.com/tatsy/tinymesh.git --depth 1
+git clone https://github.com/riyaj5246/tinymesh
 cd tinymesh
 git submodule update --init --recursive
 mkdir build && cd build
@@ -59,36 +75,37 @@ cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=ON ..
 cmake --build . --config Release --parallel 2
 ```
 
-### Python module
-
-You can install the Python module using `Pip`.
-
-```shell
-pip install git+https://github.com/tatsy/tinymesh.git
-```
-
-You can also use `poetry` to install from source codes.
-
-```shell
-git clone https://github.com/tatsy/tinymesh
-cd tinymesh
-poetry install
-```
-
 Run examples
 ---
 
-#### C++
+Before running the code, you must download JE Malloc. For unix/linux users, please run this:
 
 ```shell
-./build/bin/example_simplify data/models/bunny.ply
+sudo apt-get install libjemalloc-dev
 ```
 
-#### Python
+For Windows users, please download release 5.3.0 from JEMalloc through [here](https://github.com/jemalloc/jemalloc/releases).
+
+#### C++ 
+
+Here are example runs you can make to run the renderer. Be sure to execute these in the root folder. There are also more models for you to play around with in data/models/. We used bunny.ply as our small test case and christmas_bear.ply as our larger test case.
 
 ```shell
-# Run "poetry shell" to enable virtualenv if you test with poetry.
-python examples/python/fill_and_fair.py data/models/bunny.ply
+time ./scripts/run_with_allocator.sh jemalloc -- ./build/bin/example_simplify data/models/bunny.ply
+time ./scripts/run_with_allocator.sh jemalloc -- ./build/bin/example_denoise data/models/bunny.ply
+time ./scripts/run_with_allocator.sh jemalloc -- ./build/bin/example_read_write data/models/bunny.ply
+time ./scripts/run_with_allocator.sh jemalloc -- ./build/bin/example_remesh data/models/bunny.ply
+time ./scripts/run_with_allocator.sh jemalloc -- ./build/bin/example_smooth data/models/bunny.ply
+```
+
+Note: These run commands above will only work in the all or kmak/allocator branch. If you are in any other branch, please run commands in this form instead.
+
+```shell
+time ./build/bin/example_simplify data/models/bunny.ply
+time ./build/bin/example_denoise data/models/bunny.ply
+time ./build/bin/example_read_write data/models/bunny.ply
+time ./build/bin/example_remesh data/models/bunny.ply
+time ./build/bin/example_smooth data/models/bunny.ply
 ```
 
 Gallery
