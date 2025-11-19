@@ -20,7 +20,10 @@ namespace std {
 template <>
 struct hash<IndexPair> {
     std::size_t operator()(const IndexPair &k) const {
-        return std::get<0>(k) ^ std::get<1>(k);
+        std::size_t seed = std::hash<uint32_t>{}(std::get<0>(k));
+        const std::size_t h2 = std::hash<uint32_t>{}(std::get<1>(k));
+        seed ^= h2 + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return seed;
     }
 };
 

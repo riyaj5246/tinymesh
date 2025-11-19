@@ -5,7 +5,6 @@
 #include <iostream>
 #include <fstream>
 #include <set>
-#include <map>
 #include <queue>
 #include <tuple>
 #include <functional>
@@ -209,8 +208,8 @@ void Mesh::construct() {
 
     // Setup halfedge structure
     static const int ngon = 3;
-    std::map<IndexPair, Halfedge *> pairToHalfedge;
-    std::map<uint32_t, uint32_t> vertexDegree;
+    std::unordered_map<IndexPair, Halfedge *> pairToHalfedge;
+    std::unordered_map<uint32_t, uint32_t> vertexDegree;
     for (int i = 0; i < (int)indices_.size(); i += ngon) {
         // Check polygon duplication
         bool isDuplicated = false;
