@@ -48,10 +48,10 @@ The module is tested its compilation using the following compilers.
 
 ### Library and examples (C++)
 
-You can build a shared library and all the examples by `CMake` with the following commands.
+You can build a shared library and all the examples by `CMake` with the following commands. We ran and tested our implementation on the CS 598 APE VM.
 
 ```shell
-git clone https://github.com/tatsy/tinymesh.git --depth 1
+git clone https://github.com/riyaj5246/tinymesh
 cd tinymesh
 git submodule update --init --recursive
 mkdir build && cd build
@@ -59,36 +59,13 @@ cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_EXAMPLES=ON ..
 cmake --build . --config Release --parallel 2
 ```
 
-### Python module
-
-You can install the Python module using `Pip`.
-
-```shell
-pip install git+https://github.com/tatsy/tinymesh.git
-```
-
-You can also use `poetry` to install from source codes.
-
-```shell
-git clone https://github.com/tatsy/tinymesh
-cd tinymesh
-poetry install
-```
-
 Run examples
 ---
 
-#### C++
+#### C++ 
 
 ```shell
 ./build/bin/example_simplify data/models/bunny.ply
-```
-
-#### Python
-
-```shell
-# Run "poetry shell" to enable virtualenv if you test with poetry.
-python examples/python/fill_and_fair.py data/models/bunny.ply
 ```
 
 Gallery

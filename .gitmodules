@@ -10,3 +10,6 @@
 [submodule "src/tinymesh/ext/spectra"]
 	path = src/tinymesh/ext/spectra
 	url = https://github.com/yixuan/spectra
+[submodule "FlameGraph"]
+	path = FlameGraph
+	url = https://github.com/brendangregg/FlameGraph
